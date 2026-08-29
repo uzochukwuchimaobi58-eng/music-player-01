@@ -1,6 +1,6 @@
-
 workflows:
   android-release:
+    name: Android Release Build
     instance_type: mac_mini_m2
     environment:
       node: latest
@@ -9,8 +9,6 @@ workflows:
         script: npm install
       - name: Build Web App
         script: npm run build
-      - name: Add Android Platform
-        script: npx cap add android
       - name: Sync Capacitor
         script: npx cap sync android
       - name: Build Android Release (AAB)
