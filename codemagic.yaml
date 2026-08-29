@@ -4,16 +4,23 @@ workflows:
     instance_type: mac_mini_m2
     environment:
       node: latest
+      android_signing:
+        - android_keystore
+      vars:
+        ANDROID_SDK_ROOT: /Users/builder/android-sdk
     scripts:
       - name: Install dependencies
         script: npm install
       - name: Build Web App
         script: npm run build
+      - name: Add Android Platform
+        script: npx cap add android || true
       - name: Sync Capacitor
         script: npx cap sync android
       - name: Build Android Release (AAB)
         script: |
           cd android
+          chmod +x gradlew
           ./gradlew bundleRelease
     artifacts:
       - android/app/build/outputs/bundle/release/*.aab
