@@ -4,8 +4,6 @@ workflows:
     instance_type: mac_mini_m2
     environment:
       node: latest
-      android_signing:
-        - android_keystore
       vars:
         ANDROID_SDK_ROOT: /Users/builder/android-sdk
     scripts:
