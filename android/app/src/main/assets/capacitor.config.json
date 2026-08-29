@@ -1,0 +1,8 @@
+{
+	"appId": "com.sonance.musicplayer",
+	"appName": "Sonance Music",
+	"webDir": "dist",
+	"server": {
+		"androidScheme": "https"
+	}
+}
