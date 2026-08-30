@@ -1,30 +1,25 @@
 workflows:
   android-release:
-    name: Build Android Release AAB
-    max_build_duration: 30
-    instance_type: mac_mini_m2 # or linux_x2
+    name: Android Release Build
+    instance_type: mac_mini_m2
     environment:
       node: latest
       java: 17
+      vars:
+        ANDROID_SDK_ROOT: /Users/builder/android-sdk
     scripts:
-      - name: Install npm dependencies
-        script: |
-          npm ci || npm install
-
+      - name: Install dependencies
+        script: npm install
       - name: Build Web App
-        script: |
-          npm run build
-
-      - name: Sync Capacitor Android
-        script: |
-          npx cap sync android
-
+        script: npm run build
+      - name: Add Android Platform
+        script: npx cap add android || true
+      - name: Sync Capacitor
+        script: npx cap sync android
       - name: Build Android Release (AAB)
         script: |
           cd android
           chmod +x gradlew
           ./gradlew bundleRelease
-
     artifacts:
       - android/app/build/outputs/bundle/release/*.aab
-      - android/app/build/outputs/apk/release/*.apk
