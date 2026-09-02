@@ -34,6 +34,8 @@ interface TrackListProps {
   onPlayAll: (tracks: Track[], shuffle?: boolean) => void;
   onOpenCreatePlaylist: () => void;
   onOpenLyrics: (track: Track) => void;
+  onOpenTrackActions?: (track: Track) => void;
+  onOpenArtwork?: (track: Track) => void;
   selectedPlaylist?: Playlist;
   onRemoveFromPlaylist?: (trackId: string, playlistId: string) => void;
 }
@@ -52,6 +54,8 @@ export const TrackList: React.FC<TrackListProps> = ({
   onDeleteTrack,
   onPlayAll,
   onOpenLyrics,
+  onOpenTrackActions,
+  onOpenArtwork,
   selectedPlaylist,
   onRemoveFromPlaylist,
 }) => {
@@ -373,107 +377,18 @@ export const TrackList: React.FC<TrackListProps> = ({
                       id={`btn-track-menu-${track.id}`}
                       onClick={(e) => {
                         e.stopPropagation();
-                        setMenuOpenTrackId(isMenuOpen ? null : track.id);
-                        setPlaylistPickerTrackId(null);
+                        if (onOpenTrackActions) {
+                          onOpenTrackActions(track);
+                        } else {
+                          setMenuOpenTrackId(isMenuOpen ? null : track.id);
+                          setPlaylistPickerTrackId(null);
+                        }
                       }}
                       className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                      title="More options"
                     >
                       <MoreVertical className="w-4 h-4" />
                     </button>
-
-                    {/* Menu Popup */}
-                    {isMenuOpen && (
-                      <div
-                        className="absolute right-0 top-8 z-40 w-48 rounded-xl bg-zinc-950 border border-zinc-800 shadow-2xl p-1.5 text-xs text-zinc-200 animate-in fade-in zoom-in-95 duration-100"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <button
-                          onClick={() => {
-                            setPlaylistPickerTrackId(track.id);
-                          }}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-zinc-900 text-left cursor-pointer"
-                        >
-                          <ListPlus className="w-4 h-4 text-sky-400" />
-                          <span>Add to Playlist</span>
-                        </button>
-
-                        <button
-                          onClick={() => {
-                            onOpenLyrics(track);
-                            setMenuOpenTrackId(null);
-                          }}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-zinc-900 text-left cursor-pointer"
-                        >
-                          <FileText className="w-4 h-4 text-emerald-400" />
-                          <span>View Lyrics & Info</span>
-                        </button>
-
-                        <button
-                          onClick={() => {
-                            onMakeOffline(track);
-                            setMenuOpenTrackId(null);
-                          }}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-zinc-900 text-left cursor-pointer"
-                        >
-                          <Download className="w-4 h-4 text-amber-400" />
-                          <span>Save Offline (Cache)</span>
-                        </button>
-
-                        {selectedPlaylist && onRemoveFromPlaylist && (
-                          <button
-                            onClick={() => {
-                              onRemoveFromPlaylist(track.id, selectedPlaylist.id);
-                              setMenuOpenTrackId(null);
-                            }}
-                            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-rose-500/20 text-rose-400 text-left cursor-pointer"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                            <span>Remove from playlist</span>
-                          </button>
-                        )}
-
-                        {onDeleteTrack && track.sourceType === 'user-upload' && (
-                          <button
-                            onClick={() => {
-                              onDeleteTrack(track.id);
-                              setMenuOpenTrackId(null);
-                            }}
-                            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-rose-500/20 text-rose-400 text-left cursor-pointer"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                            <span>Delete local file</span>
-                          </button>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Nested Playlist Sub-picker */}
-                    {playlistPickerTrackId === track.id && (
-                      <div
-                        className="absolute right-0 top-8 z-50 w-52 rounded-xl bg-zinc-950 border border-zinc-800 shadow-2xl p-2 text-xs animate-in fade-in"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <p className="text-[10px] font-bold text-zinc-500 px-2 py-1 uppercase tracking-widest">
-                          Select Playlist
-                        </p>
-                        <div className="max-h-44 overflow-y-auto space-y-1 my-1">
-                          {allPlaylists.map((pl) => (
-                            <button
-                              key={pl.id}
-                              onClick={() => {
-                                onAddToPlaylist(track.id, pl.id);
-                                setMenuOpenTrackId(null);
-                                setPlaylistPickerTrackId(null);
-                              }}
-                              className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-zinc-900 text-zinc-200 text-left cursor-pointer"
-                            >
-                              <span className="truncate">{pl.name}</span>
-                              <Plus className="w-3.5 h-3.5 text-zinc-400" />
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>

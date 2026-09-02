@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Sliders, RotateCcw, Sparkles, Volume2, Waves } from 'lucide-react';
+import { X, Sliders, RotateCcw, Sparkles, Volume2, Waves, Flame, Crown, Lock } from 'lucide-react';
 import { EqualizerSettings, EqPreset } from '../types';
 import { EQ_FREQUENCIES, EQ_PRESET_MAP } from '../data/defaultTracks';
 import { VisualizerCanvas } from './VisualizerCanvas';
@@ -10,6 +10,11 @@ interface EqualizerModalProps {
   settings: EqualizerSettings;
   onChangeSettings: (newSettings: EqualizerSettings) => void;
   isPlaying: boolean;
+  use10Bands?: boolean;
+  accentColorHex?: string;
+  isProUser?: boolean;
+  onOpenProModal?: () => void;
+  onToggle10Bands?: (enable10: boolean) => void;
 }
 
 export const EqualizerModal: React.FC<EqualizerModalProps> = ({
@@ -18,8 +23,35 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
   settings,
   onChangeSettings,
   isPlaying,
+  use10Bands = true,
+  accentColorHex = '#f5b731',
+  isProUser = false,
+  onOpenProModal,
+  onToggle10Bands,
 }) => {
+  const [proAlert, setProAlert] = React.useState<string | null>(null);
+
   if (!isOpen) return null;
+
+  // If not pro, 10-band EQ is restricted to 5 bands unless upgraded
+  const effectiveUse10Bands = isProUser ? use10Bands : false;
+
+  const displayFrequencies = effectiveUse10Bands
+    ? EQ_FREQUENCIES
+    : [60, 250, 1000, 4000, 16000];
+
+  const handleProFeatureClick = (featureName: string) => {
+    if (!isProUser) {
+      setProAlert(`${featureName} is exclusive to Sonance Pro ($0.99/mo or $4.99/yr)`);
+      if (onOpenProModal) {
+        setTimeout(() => {
+          onOpenProModal();
+        }, 500);
+      }
+      return true;
+    }
+    return false;
+  };
 
   const presets: EqPreset[] = [
     'Hi-Fi Master',
@@ -75,7 +107,7 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
   return (
     <div
       id="equalizer-modal"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs select-none animate-in fade-in duration-200 font-sans"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-xs select-none animate-in fade-in duration-200 font-sans"
     >
       <div className="w-full max-w-lg bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col text-zinc-100 max-h-[92vh]">
         {/* Header */}
@@ -85,18 +117,30 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
               <Sliders className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-white flex items-center gap-2 tracking-tight">
-                10-Band Equalizer & FX
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-white tracking-tight">
+                  {effectiveUse10Bands ? '10-Band' : '5-Band'} HD Equalizer
+                </h3>
+                {isProUser ? (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30 flex items-center gap-1">
+                    <Crown className="w-2.5 h-2.5" />
+                    PRO HD
+                  </span>
+                ) : (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 font-medium">
+                    5-Band Free
+                  </span>
+                )}
+              </div>
               <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider">
-                Precision DSP Engine
+                {effectiveUse10Bands ? '10-Band Precision DSP Mastering' : 'Standard 5-Band Mode (10-Band on Pro)'}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
             {/* Master Toggle Switch */}
-            <label className="relative inline-flex items-center cursor-pointer">
+            <label className="relative inline-flex items-center cursor-pointer" title="Enable/Disable DSP">
               <input
                 type="checkbox"
                 checked={settings.enabled}
@@ -108,24 +152,94 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
 
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
+        {/* Pro Alert Banner */}
+        {proAlert && (
+          <div className="mx-4 mt-3 p-3 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs flex items-center justify-between gap-2 animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <Crown className="w-4 h-4 shrink-0 text-amber-400" />
+              <span className="truncate">{proAlert}</span>
+            </div>
+            <button
+              onClick={() => {
+                onClose();
+                onOpenProModal?.();
+              }}
+              className="px-2.5 py-1 rounded-lg bg-amber-400 text-black font-bold text-[10px] shrink-0 hover:bg-amber-300 cursor-pointer"
+            >
+              Upgrade ($0.99)
+            </button>
+          </div>
+        )}
+
         <div className="p-4 sm:p-5 overflow-y-auto space-y-5">
+          {/* Mode Switcher & Lossless Badge */}
+          <div className="flex items-center justify-between bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-800 text-xs">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-zinc-400">EQ Mode:</span>
+              <button
+                onClick={() => onToggle10Bands?.(false)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition-colors ${
+                  !effectiveUse10Bands ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                5-Band
+              </button>
+              <button
+                onClick={() => {
+                  if (handleProFeatureClick('10-band Equalizer')) return;
+                  onToggle10Bands?.(true);
+                }}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition-colors flex items-center gap-1 ${
+                  effectiveUse10Bands
+                    ? 'bg-amber-400 text-black shadow-sm'
+                    : 'text-amber-300/80 bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20'
+                }`}
+              >
+                {!isProUser && <Lock className="w-2.5 h-2.5 text-amber-400" />}
+                <span>10-Band HD</span>
+                {!isProUser && <span className="text-[8px] bg-amber-400 text-black px-1 rounded font-black">PRO</span>}
+              </button>
+            </div>
+
+            {/* Lossless HD Toggle */}
+            <div
+              onClick={() => {
+                if (handleProFeatureClick('Lossless Audio Engine (24-bit/96kHz)')) return;
+                onChangeSettings({ ...settings, losslessMastering: !settings.losslessMastering });
+              }}
+              className="flex items-center gap-1.5 text-[11px] cursor-pointer"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span className="font-semibold text-zinc-300">Lossless 24-bit</span>
+              {isProUser ? (
+                <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-bold">
+                  ACTIVE
+                </span>
+              ) : (
+                <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-400 font-bold border border-amber-500/30 flex items-center gap-0.5">
+                  <Lock className="w-2 h-2" /> PRO
+                </span>
+              )}
+            </div>
+          </div>
+
           {/* Live Visualizer feedback in EQ modal */}
           <div className="h-14 bg-black rounded-xl border border-zinc-800 p-2 flex items-center justify-center relative overflow-hidden">
             <VisualizerCanvas
               isPlaying={isPlaying && settings.enabled}
               type="bars"
-              color={settings.enabled ? '#ffffff' : '#52525b'}
+              color={settings.enabled ? (isProUser ? '#f59e0b' : '#ffffff') : '#52525b'}
               barCount={32}
             />
             <div className="absolute top-1.5 left-2.5 text-[9px] font-mono text-zinc-500 uppercase tracking-wider">
-              DSP FREQUENCY SPECTRUM
+              {isProUser ? 'PRO LOSSLESS FREQUENCY SPECTRUM' : 'DSP FREQUENCY SPECTRUM'}
             </div>
           </div>
 
@@ -137,7 +251,7 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
               </span>
               <button
                 onClick={handleReset}
-                className="text-[11px] text-zinc-400 hover:text-white flex items-center gap-1 transition-colors font-medium"
+                className="text-[11px] text-zinc-400 hover:text-white flex items-center gap-1 transition-colors font-medium cursor-pointer"
               >
                 <RotateCcw className="w-3 h-3" />
                 <span>Reset Flat</span>
@@ -151,7 +265,7 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                   <button
                     key={p}
                     onClick={() => handleSelectPreset(p)}
-                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                       isActive
                         ? 'bg-white text-black shadow-md font-bold'
                         : 'bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800 border border-zinc-800'
@@ -164,10 +278,10 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
             </div>
           </div>
 
-          {/* 10 Vertical Band Sliders */}
+          {/* Vertical Band Sliders */}
           <div className={`p-3 sm:p-4 rounded-xl bg-zinc-900/90 border border-zinc-800 transition-opacity ${settings.enabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
             <div className="flex items-end justify-between gap-1 sm:gap-2 h-44 sm:h-48 pt-4 pb-2">
-              {EQ_FREQUENCIES.map((freq) => {
+              {displayFrequencies.map((freq) => {
                 const currentGain = settings.bands[freq] || 0;
                 return (
                   <div key={freq} className="flex-1 flex flex-col items-center h-full justify-between">
@@ -206,58 +320,129 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
             </div>
           </div>
 
-          {/* Dedicated FX Knobs/Sliders: Bass Boost, 3D Spatial Reverb, Treble */}
-          <div className={`grid grid-cols-1 sm:grid-cols-3 gap-3 ${settings.enabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
-            {/* Bass Boost */}
-            <div className="p-3 rounded-xl bg-zinc-900/90 border border-zinc-800">
+          {/* Dedicated Pro FX Sliders: Bass Boost, 3D Spatial Reverb, Tube Warmer, Treble HD */}
+          <div className={`grid grid-cols-2 sm:grid-cols-4 gap-2.5 ${settings.enabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
+            {/* 1. Bass Boost (PRO) */}
+            <div
+              className={`p-3 rounded-xl border transition-all ${
+                !isProUser
+                  ? 'bg-zinc-900/40 border-zinc-800/80 hover:border-amber-500/40 cursor-pointer'
+                  : 'bg-zinc-900/90 border-zinc-800'
+              }`}
+              onClick={() => {
+                if (!isProUser) handleProFeatureClick('Bass Boost');
+              }}
+            >
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-bold text-zinc-200 flex items-center gap-1">
+                <span className="text-[11px] font-bold text-zinc-200 flex items-center gap-1">
                   <Waves className="w-3.5 h-3.5 text-indigo-400" />
                   Bass Boost
                 </span>
-                <span className="text-xs font-mono font-bold text-zinc-400">
-                  {settings.bassBoost}%
-                </span>
+                {!isProUser ? (
+                  <span className="text-[8px] bg-amber-500/20 text-amber-300 px-1 rounded font-bold border border-amber-500/30 flex items-center gap-0.5">
+                    <Lock className="w-2 h-2" /> PRO
+                  </span>
+                ) : (
+                  <span className="text-xs font-mono font-bold text-zinc-400">
+                    {settings.bassBoost}%
+                  </span>
+                )}
               </div>
               <input
                 type="range"
                 min={0}
                 max={100}
-                value={settings.bassBoost}
+                value={isProUser ? settings.bassBoost : 0}
+                disabled={!isProUser}
                 onChange={(e) =>
                   onChangeSettings({ ...settings, bassBoost: parseInt(e.target.value) })
                 }
-                className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-white"
+                className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-amber-400 disabled:opacity-40"
               />
             </div>
 
-            {/* 3D Spatial Reverb */}
-            <div className="p-3 rounded-xl bg-zinc-900/90 border border-zinc-800">
+            {/* 2. 3D Spatial Reverb (PRO) */}
+            <div
+              className={`p-3 rounded-xl border transition-all ${
+                !isProUser
+                  ? 'bg-zinc-900/40 border-zinc-800/80 hover:border-amber-500/40 cursor-pointer'
+                  : 'bg-zinc-900/90 border-zinc-800'
+              }`}
+              onClick={() => {
+                if (!isProUser) handleProFeatureClick('3D Spatial Reverb');
+              }}
+            >
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-bold text-zinc-200 flex items-center gap-1">
+                <span className="text-[11px] font-bold text-zinc-200 flex items-center gap-1">
                   <Sparkles className="w-3.5 h-3.5 text-sky-400" />
-                  3D Spatial
+                  3D Reverb
                 </span>
-                <span className="text-xs font-mono font-bold text-zinc-400">
-                  {settings.spatialReverb}%
-                </span>
+                {!isProUser ? (
+                  <span className="text-[8px] bg-amber-500/20 text-amber-300 px-1 rounded font-bold border border-amber-500/30 flex items-center gap-0.5">
+                    <Lock className="w-2 h-2" /> PRO
+                  </span>
+                ) : (
+                  <span className="text-xs font-mono font-bold text-zinc-400">
+                    {settings.spatialReverb}%
+                  </span>
+                )}
               </div>
               <input
                 type="range"
                 min={0}
                 max={100}
-                value={settings.spatialReverb}
+                value={isProUser ? settings.spatialReverb : 0}
+                disabled={!isProUser}
                 onChange={(e) =>
                   onChangeSettings({ ...settings, spatialReverb: parseInt(e.target.value) })
                 }
-                className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-white"
+                className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-sky-400 disabled:opacity-40"
               />
             </div>
 
-            {/* Treble Clarity */}
+            {/* 3. Tube Warmer (Analog Saturation) (PRO) */}
+            <div
+              className={`p-3 rounded-xl border transition-all ${
+                !isProUser
+                  ? 'bg-zinc-900/40 border-zinc-800/80 hover:border-amber-500/40 cursor-pointer'
+                  : 'bg-zinc-900/90 border-zinc-800'
+              }`}
+              onClick={() => {
+                if (!isProUser) handleProFeatureClick('Tube Warmers (Analog Harmonics)');
+              }}
+            >
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[11px] font-bold text-zinc-200 flex items-center gap-1">
+                  <Flame className="w-3.5 h-3.5 text-amber-500" />
+                  Tube Warmer
+                </span>
+                {!isProUser ? (
+                  <span className="text-[8px] bg-amber-500/20 text-amber-300 px-1 rounded font-bold border border-amber-500/30 flex items-center gap-0.5">
+                    <Lock className="w-2 h-2" /> PRO
+                  </span>
+                ) : (
+                  <span className="text-xs font-mono font-bold text-zinc-400">
+                    {settings.tubeWarmer || 0}%
+                  </span>
+                )}
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={isProUser ? (settings.tubeWarmer || 0) : 0}
+                disabled={!isProUser}
+                onChange={(e) =>
+                  onChangeSettings({ ...settings, tubeWarmer: parseInt(e.target.value) })
+                }
+                className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-amber-500 disabled:opacity-40"
+              />
+            </div>
+
+            {/* 4. Treble Clarity / HD */}
             <div className="p-3 rounded-xl bg-zinc-900/90 border border-zinc-800">
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-bold text-zinc-200 flex items-center gap-1">
+                <span className="text-[11px] font-bold text-zinc-200 flex items-center gap-1">
                   <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
                   Treble HD
                 </span>
@@ -273,14 +458,19 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                 onChange={(e) =>
                   onChangeSettings({ ...settings, trebleBoost: parseInt(e.target.value) })
                 }
-                className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-white"
+                className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-emerald-400"
               />
             </div>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-zinc-800 bg-black/60 flex justify-end">
+        <div className="p-4 border-t border-zinc-800 bg-black/60 flex items-center justify-between">
+          <div className="text-[11px] text-zinc-400 flex items-center gap-1.5">
+            <Crown className="w-3.5 h-3.5 text-amber-400" />
+            <span>{isProUser ? 'Sonance Pro Active: All HD Audio Unlocked' : 'Upgrade to Pro for full 10-band & tube warmers'}</span>
+          </div>
+
           <button
             onClick={onClose}
             className="px-5 py-2 rounded-lg bg-white hover:bg-zinc-200 text-black font-bold text-xs shadow-md transition-all active:scale-95 cursor-pointer"

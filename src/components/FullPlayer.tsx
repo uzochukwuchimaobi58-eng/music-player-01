@@ -24,7 +24,10 @@ import {
   Zap,
   Mic2,
   MicOff,
-  Crown
+  Crown,
+  Camera,
+  MoreVertical,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { Track, RepeatMode } from '../types';
 import { TrendingAudioEffect } from '../services/audioEngine';
@@ -45,6 +48,11 @@ interface FullPlayerProps {
   activeTrendingEffect: TrendingAudioEffect;
   isKaraokeMode: boolean;
   isProUser: boolean;
+  forwardAndBackward?: boolean;
+  swipeToChangeSongs?: boolean;
+  accentColorHex?: string;
+  onOpenArtwork?: (track: Track) => void;
+  onOpenTrackActions?: (track: Track) => void;
   onTogglePlay: () => void;
   onPrevTrack: () => void;
   onNextTrack: () => void;
@@ -80,6 +88,11 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
   activeTrendingEffect,
   isKaraokeMode,
   isProUser,
+  forwardAndBackward = false,
+  swipeToChangeSongs = true,
+  accentColorHex = '#f5b731',
+  onOpenArtwork,
+  onOpenTrackActions,
   onTogglePlay,
   onPrevTrack,
   onNextTrack,
@@ -101,8 +114,28 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
 }) => {
   const [visualizerMode, setVisualizerMode] = useState<'bars' | 'wave' | 'circle'>('bars');
   const [showFXMenu, setShowFXMenu] = useState(false);
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
 
   if (!isOpen || !currentTrack) return null;
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (!swipeToChangeSongs) return;
+    setTouchStartX(e.touches[0].clientX);
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (!swipeToChangeSongs || touchStartX === null) return;
+    const touchEndX = e.changedTouches[0].clientX;
+    const diff = touchEndX - touchStartX;
+    if (diff > 50) {
+      // Swiped right -> previous track
+      onPrevTrack();
+    } else if (diff < -50) {
+      // Swiped left -> next track
+      onNextTrack();
+    }
+    setTouchStartX(null);
+  };
 
   const formatTime = (seconds: number) => {
     if (isNaN(seconds)) return '0:00';
@@ -190,11 +223,26 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
             >
               <ListMusic className="w-5 h-5" />
             </button>
+
+            {onOpenTrackActions && (
+              <button
+                id="btn-full-track-actions"
+                onClick={() => onOpenTrackActions(currentTrack)}
+                title="Track options"
+                className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <MoreVertical className="w-5 h-5" />
+              </button>
+            )}
           </div>
         </div>
 
         {/* Center Artwork & Visualizer */}
-        <div className="my-auto py-3 flex flex-col items-center">
+        <div
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+          className="my-auto py-3 flex flex-col items-center cursor-grab active:cursor-grabbing"
+        >
           {/* Vinyl Disc Container */}
           <div className="relative w-64 h-64 sm:w-72 sm:h-72 my-1 flex items-center justify-center">
             {/* Ambient visualizer ring */}
@@ -216,15 +264,29 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
               <div className="absolute inset-12 rounded-full border border-zinc-800/40 pointer-events-none" />
 
               {/* Album Art Centerpiece */}
-              <div className="relative w-36 h-36 sm:w-40 sm:h-40 rounded-full overflow-hidden border-2 border-zinc-700 shadow-inner">
+              <div
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onOpenArtwork) onOpenArtwork(currentTrack);
+                }}
+                className="relative w-36 h-36 sm:w-40 sm:h-40 rounded-full overflow-hidden border-2 border-zinc-700 shadow-inner group cursor-pointer"
+                title="Change Cover Artwork (Camera / Gallery)"
+              >
                 <img
                   src={currentTrack.coverArt}
                   alt={currentTrack.title}
                   referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                 />
+
+                {/* Hover Camera Overlay */}
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-white transition-opacity">
+                  <Camera className="w-6 h-6 text-amber-400 mb-1" />
+                  <span className="text-[9px] font-bold uppercase tracking-wider">Edit Artwork</span>
+                </div>
+
                 {/* Center spindle hole */}
-                <div className="absolute inset-0 m-auto w-5 h-5 rounded-full bg-black border-2 border-zinc-500 shadow-md" />
+                <div className="absolute inset-0 m-auto w-5 h-5 rounded-full bg-black border-2 border-zinc-500 shadow-md pointer-events-none" />
               </div>
             </div>
           </div>
@@ -377,14 +439,16 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
             <Shuffle className="w-5 h-5" />
           </button>
 
-          {/* Skip Back 10s */}
-          <button
-            onClick={() => onSeek(Math.max(0, currentTime - 10))}
-            title="Rewind 10s"
-            className="p-2 rounded-lg text-zinc-400 hover:text-white transition-colors cursor-pointer"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
+          {/* Skip Back 10s (controlled by forwardAndBackward setting) */}
+          {forwardAndBackward && (
+            <button
+              onClick={() => onSeek(Math.max(0, currentTime - 10))}
+              title="Rewind 10s"
+              className="p-2 rounded-lg text-zinc-400 hover:text-white transition-colors cursor-pointer"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </button>
+          )}
 
           {/* Previous Track */}
           <button
@@ -400,6 +464,9 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
             id="btn-full-play-pause"
             onClick={onTogglePlay}
             className="w-16 h-16 rounded-full bg-white hover:bg-zinc-200 text-black flex items-center justify-center shadow-2xl active:scale-95 transition-all cursor-pointer"
+            style={{
+              boxShadow: `0 0 25px ${accentColorHex}50`
+            }}
           >
             {isPlaying ? (
               <Pause className="w-8 h-8 fill-black" />
@@ -417,14 +484,16 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
             <SkipForward className="w-7 h-7 fill-current" />
           </button>
 
-          {/* Forward 10s */}
-          <button
-            onClick={() => onSeek(Math.min(duration, currentTime + 10))}
-            title="Forward 10s"
-            className="p-2 rounded-lg text-zinc-400 hover:text-white transition-colors cursor-pointer"
-          >
-            <RotateCw className="w-4 h-4" />
-          </button>
+          {/* Forward 10s (controlled by forwardAndBackward setting) */}
+          {forwardAndBackward && (
+            <button
+              onClick={() => onSeek(Math.min(duration, currentTime + 10))}
+              title="Forward 10s"
+              className="p-2 rounded-lg text-zinc-400 hover:text-white transition-colors cursor-pointer"
+            >
+              <RotateCw className="w-4 h-4" />
+            </button>
+          )}
 
           {/* Repeat Mode */}
           <button

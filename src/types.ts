@@ -62,6 +62,9 @@ export type AppTheme =
   | 'cyberpunk'
   | 'midnight-blue'
   | 'sunset-warm'
+  | 'emerald-forest'
+  | 'crimson-ruby'
+  | 'golden-luxury'
   | 'light-minimal';
 
 export type ActiveView =
@@ -82,6 +85,45 @@ export interface EqualizerSettings {
   bassBoost: number; // 0 to 100
   spatialReverb: number; // 0 to 100
   trebleBoost: number; // 0 to 100
+  tubeWarmer?: number; // 0 to 100 (Pro)
+  losslessMastering?: boolean; // (Pro)
+}
+
+export type AccentColor = 'gold' | 'cyan' | 'purple' | 'emerald' | 'rose' | 'blue';
+
+export type QueueAfterSearchMode = 'play_now' | 'add_queue' | 'play_next';
+
+export type ShuffleButtonVisibility = 'floating_fab' | 'header_only' | 'hidden';
+
+export type StatusBarLyricsMode = 'off' | 'single_line' | 'karaoke_scroll';
+
+export type LibraryTabKey = 'all' | 'folder' | 'album' | 'artist' | 'genre' | 'favorite';
+
+export interface PlayerSettings {
+  // Normal Section
+  use10BandsEqualizer: boolean;
+  showHiddenFiles: boolean;
+  showDirectories: boolean;
+  nightMode: boolean;
+  keepScreenOn: boolean;
+  showYouTubeSearchEntry: boolean;
+  forwardAndBackward: boolean;
+  queueAfterSearching: QueueAfterSearchMode;
+  showShuffleButton: ShuffleButtonVisibility;
+  accentColor: AccentColor;
+  libraryTabOrder: LibraryTabKey[];
+
+  // Lyrics Section
+  desktopLyrics: boolean;
+  carBluetoothLyrics: boolean;
+  statusBarLyrics: StatusBarLyricsMode;
+
+  // Audio Section
+  shakeToPlayNext: boolean;
+  swipeToChangeSongs: boolean;
+  allowOthersPlaying: boolean;
+  playPauseFade: boolean;
+  gaplessPlayback: boolean;
 }
 
 export interface PlayerState {

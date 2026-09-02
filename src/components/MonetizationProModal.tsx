@@ -84,12 +84,12 @@ export const MonetizationProModal: React.FC<MonetizationProModalProps> = ({
         {/* Feature List */}
         <div className="space-y-2.5 my-3 bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-3.5">
           <div className="flex items-center gap-3 text-xs">
-            <div className="w-6 h-6 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center shrink-0">
-              <Zap className="w-3.5 h-3.5" />
+            <div className="w-6 h-6 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center shrink-0">
+              <ShieldCheck className="w-3.5 h-3.5" />
             </div>
             <div>
-              <p className="font-semibold text-white">Viral Sped-Up & Slowed+Reverb Engine</p>
-              <p className="text-[10px] text-zinc-400">Nightcore, Lo-Fi Tape, & TikTok speed filters</p>
+              <p className="font-semibold text-white">Ad-Free Experience</p>
+              <p className="text-[10px] text-zinc-400">Completely remove banner or interstitial ads</p>
             </div>
           </div>
 
@@ -98,8 +98,8 @@ export const MonetizationProModal: React.FC<MonetizationProModalProps> = ({
               <Mic className="w-3.5 h-3.5" />
             </div>
             <div>
-              <p className="font-semibold text-white">AI Vocal Remover & Karaoke</p>
-              <p className="text-[10px] text-zinc-400">Isolate instrumentals & sing along with synced lyrics</p>
+              <p className="font-semibold text-white">AI Beat & Instrumental Isolation</p>
+              <p className="text-[10px] text-zinc-400">Exporting pure beats, drums, bass & studio stems</p>
             </div>
           </div>
 
@@ -108,8 +108,18 @@ export const MonetizationProModal: React.FC<MonetizationProModalProps> = ({
               <Sliders className="w-3.5 h-3.5" />
             </div>
             <div>
-              <p className="font-semibold text-white">10-Band Hi-Fi DSP & Bass Engine</p>
-              <p className="text-[10px] text-zinc-400">Lossless spatial reverb & studio limiter</p>
+              <p className="font-semibold text-white">Lossless Audio & HD Equalizer</p>
+              <p className="text-[10px] text-zinc-400">Unlocking 10-band EQ, tube warmers, 3D Reverb, and Bass Boost</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 text-xs">
+            <div className="w-6 h-6 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center shrink-0">
+              <Zap className="w-3.5 h-3.5" />
+            </div>
+            <div>
+              <p className="font-semibold text-white">Exclusive Themes</p>
+              <p className="text-[10px] text-zinc-400">Custom gradient and OLED AMOLED themes</p>
             </div>
           </div>
 
@@ -118,26 +128,17 @@ export const MonetizationProModal: React.FC<MonetizationProModalProps> = ({
               <Scissors className="w-3.5 h-3.5" />
             </div>
             <div>
-              <p className="font-semibold text-white">Unlimited Ringtone & Audio Cutter</p>
-              <p className="text-[10px] text-zinc-400">Set custom alarm & phone ringtones directly</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 text-xs">
-            <div className="w-6 h-6 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center shrink-0">
-              <ShieldCheck className="w-3.5 h-3.5" />
-            </div>
-            <div>
-              <p className="font-semibold text-white">100% Ad-Free & Unlimited Offline Storage</p>
-              <p className="text-[10px] text-zinc-400">Pure distraction-free offline listening</p>
+              <p className="font-semibold text-white">Advanced Trimmer & Tag Editor</p>
+              <p className="text-[10px] text-zinc-400">Batch ID3 tag editor and high-precision ringtone export</p>
             </div>
           </div>
         </div>
 
         {/* Pricing Tier Selector */}
         <div className="grid grid-cols-3 gap-2 my-4">
-          {/* Monthly */}
+          {/* Monthly: 0.99 */}
           <div
+            id="plan-selector-monthly"
             onClick={() => setSelectedPlan('monthly')}
             className={`p-3 rounded-2xl border flex flex-col items-center justify-between text-center transition-all cursor-pointer ${
               selectedPlan === 'monthly'
@@ -150,11 +151,12 @@ export const MonetizationProModal: React.FC<MonetizationProModalProps> = ({
             <span className="text-[9px] text-zinc-500">per month</span>
           </div>
 
-          {/* Lifetime Deal (Most Popular) */}
+          {/* Yearly: 4.99 (Best Value) */}
           <div
-            onClick={() => setSelectedPlan('lifetime')}
+            id="plan-selector-yearly"
+            onClick={() => setSelectedPlan('yearly')}
             className={`relative p-3 rounded-2xl border flex flex-col items-center justify-between text-center transition-all cursor-pointer ${
-              selectedPlan === 'lifetime'
+              selectedPlan === 'yearly'
                 ? 'bg-gradient-to-b from-amber-500/20 to-amber-900/20 border-amber-400 shadow-lg scale-105'
                 : 'bg-zinc-900/80 border-zinc-800 text-zinc-400 hover:border-zinc-700'
             }`}
@@ -162,23 +164,24 @@ export const MonetizationProModal: React.FC<MonetizationProModalProps> = ({
             <span className="absolute -top-2 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-amber-500 text-[8px] font-black text-black uppercase tracking-wider shadow">
               BEST VALUE
             </span>
-            <span className="text-[10px] font-bold uppercase text-amber-400 mt-1">Lifetime</span>
-            <p className="text-lg font-black text-white my-0.5">$4.99</p>
-            <span className="text-[9px] text-amber-400/80 font-bold">One-time pay</span>
+            <span className="text-[10px] font-bold uppercase text-amber-400 mt-1">Yearly</span>
+            <p className="text-base font-black text-white my-1">$4.99</p>
+            <span className="text-[9px] text-amber-400/90 font-bold">$0.41 / mo</span>
           </div>
 
-          {/* Yearly */}
+          {/* Lifetime: 9.99 */}
           <div
-            onClick={() => setSelectedPlan('yearly')}
+            id="plan-selector-lifetime"
+            onClick={() => setSelectedPlan('lifetime')}
             className={`p-3 rounded-2xl border flex flex-col items-center justify-between text-center transition-all cursor-pointer ${
-              selectedPlan === 'yearly'
+              selectedPlan === 'lifetime'
                 ? 'bg-zinc-800 border-amber-400 shadow-md scale-102'
                 : 'bg-zinc-900/80 border-zinc-800 text-zinc-400 hover:border-zinc-700'
             }`}
           >
-            <span className="text-[10px] font-bold uppercase text-zinc-400">Yearly</span>
-            <p className="text-base font-black text-white my-1">$5.99</p>
-            <span className="text-[9px] text-zinc-500">$0.50 / mo</span>
+            <span className="text-[10px] font-bold uppercase text-zinc-400">Lifetime</span>
+            <p className="text-base font-black text-white my-1">$9.99</p>
+            <span className="text-[9px] text-zinc-500">One-time pay</span>
           </div>
         </div>
 

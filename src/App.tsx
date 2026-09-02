@@ -8,6 +8,7 @@ import {
   ActiveView,
   EqualizerSettings,
   PlayerState,
+  PlayerSettings,
 } from './types';
 import {
   loadStoredTracks,
@@ -18,10 +19,13 @@ import {
   saveStoredEq,
   loadStoredTheme,
   saveStoredTheme,
+  loadStoredPlayerSettings,
+  saveStoredPlayerSettings,
   storeAudioBlobOffline,
   getAudioBlobOffline,
   removeAudioBlobOffline,
   DEFAULT_EQ_SETTINGS,
+  DEFAULT_PLAYER_SETTINGS,
 } from './services/storage';
 import {
   restoreTrackBlobUrls,
@@ -29,6 +33,7 @@ import {
   scanAudioFiles,
 } from './services/deviceScanner';
 import { audioEngine, TrendingAudioEffect } from './services/audioEngine';
+import { getThemeConfig } from './data/themes';
 import { MusicLibrary } from './plugins/MusicLibrary';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
@@ -44,9 +49,18 @@ import { DriveModeView } from './components/DriveModeView';
 import { LyricsModal } from './components/LyricsModal';
 import { QueueModal } from './components/QueueModal';
 import { ThemeModal } from './components/ThemeModal';
-import { SettingsModal } from './components/SettingsModal';
+import { SettingsModal, ACCENT_COLOR_MAP } from './components/SettingsModal';
 import { RingtoneTrimmerModal } from './components/RingtoneTrimmerModal';
+import { KaraokeStudioModal } from './components/KaraokeStudioModal';
+import { BeatInstrumentalModal } from './components/BeatInstrumentalModal';
 import { MonetizationProModal } from './components/MonetizationProModal';
+import { WebBrowserModal } from './components/WebBrowserModal';
+import { WidgetModal } from './components/WidgetModal';
+import { HiddenFilesModal } from './components/HiddenFilesModal';
+import { TrackActionMenuModal } from './components/TrackActionMenuModal';
+import { ArtworkUploadModal } from './components/ArtworkUploadModal';
+import { DriveSafetyModal } from './components/DriveSafetyModal';
+import { AdBanner } from './components/AdBanner';
 
 export default function App() {
   // --- Persistent State ---
@@ -54,6 +68,7 @@ export default function App() {
   const [playlists, setPlaylists] = useState<Playlist[]>(() => loadStoredPlaylists());
   const [theme, setTheme] = useState<AppTheme>(() => loadStoredTheme());
   const [eqSettings, setEqSettings] = useState<EqualizerSettings>(() => loadStoredEq());
+  const [playerSettings, setPlayerSettings] = useState<PlayerSettings>(() => loadStoredPlayerSettings());
   const [isProUser, setIsProUser] = useState<boolean>(() => {
     return localStorage.getItem('sonance_pro_active') === 'true';
   });
@@ -77,9 +92,17 @@ export default function App() {
   const [isThemeOpen, setIsThemeOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isRingtoneOpen, setIsRingtoneOpen] = useState(false);
+  const [isKaraokeStudioOpen, setIsKaraokeStudioOpen] = useState(false);
+  const [isBeatInstrumentalOpen, setIsBeatInstrumentalOpen] = useState(false);
   const [isProModalOpen, setIsProModalOpen] = useState(false);
+  const [isWebBrowserOpen, setIsWebBrowserOpen] = useState(false);
+  const [isWidgetOpen, setIsWidgetOpen] = useState(false);
+  const [isHiddenFilesOpen, setIsHiddenFilesOpen] = useState(false);
   const [isCachingAll, setIsCachingAll] = useState(false);
   const [autoSyncToast, setAutoSyncToast] = useState<string | null>(null);
+  const [actionMenuTrack, setActionMenuTrack] = useState<Track | null>(null);
+  const [artworkModalTrack, setArtworkModalTrack] = useState<Track | null>(null);
+  const [isDriveSafetyModalOpen, setIsDriveSafetyModalOpen] = useState(false);
 
   // --- Playback State & Trending FX ---
   const [currentTrackId, setCurrentTrackId] = useState<string | null>(() => {
@@ -128,9 +151,107 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
+    saveStoredPlayerSettings(playerSettings);
+  }, [playerSettings]);
+
+  useEffect(() => {
     saveStoredEq(eqSettings);
     audioEngine.applyEqualizer(eqSettings);
   }, [eqSettings]);
+
+  // Update Settings handler
+  const handleUpdateSettings = (partial: Partial<PlayerSettings>) => {
+    setPlayerSettings((prev) => {
+      const updated = { ...prev, ...partial };
+      saveStoredPlayerSettings(updated);
+      return updated;
+    });
+  };
+
+  // Remove Duplicates handler
+  const handleRemoveDuplicateTracks = (duplicateIds: string[]) => {
+    setTracks((prev) => prev.filter((t) => !duplicateIds.includes(t.id)));
+    setActiveQueue((prev) => prev.filter((t) => !duplicateIds.includes(t.id)));
+    setAutoSyncToast(`Removed ${duplicateIds.length} duplicate songs`);
+    setTimeout(() => setAutoSyncToast(null), 3000);
+  };
+
+  // Keep screen awake (WakeLock API) when enabled
+  useEffect(() => {
+    let wakeLockSentinel: any = null;
+    const requestWakeLock = async () => {
+      if (playerSettings.keepScreenOn && 'wakeLock' in navigator) {
+        try {
+          wakeLockSentinel = await (navigator as any).wakeLock.request('screen');
+        } catch (e) {
+          console.debug('Wake lock request not granted', e);
+        }
+      }
+    };
+    requestWakeLock();
+    return () => {
+      if (wakeLockSentinel) {
+        wakeLockSentinel.release().catch(() => {});
+      }
+    };
+  }, [playerSettings.keepScreenOn]);
+
+  // Shake to play next song
+  useEffect(() => {
+    if (!playerSettings.shakeToPlayNext) return;
+    let lastX = 0;
+    let lastY = 0;
+    let lastZ = 0;
+    let lastTime = 0;
+    const threshold = 18;
+
+    const handleMotion = (e: DeviceMotionEvent) => {
+      const acc = e.accelerationIncludingGravity;
+      if (!acc) return;
+      const now = Date.now();
+      if (now - lastTime > 350) {
+        const diffTime = now - lastTime;
+        lastTime = now;
+        const speed =
+          (Math.abs((acc.x || 0) + (acc.y || 0) + (acc.z || 0) - lastX - lastY - lastZ) / diffTime) *
+          10000;
+        if (speed > threshold) {
+          handleNextTrack();
+          setAutoSyncToast('📳 Shake detected: Next Track');
+          setTimeout(() => setAutoSyncToast(null), 2000);
+        }
+        lastX = acc.x || 0;
+        lastY = acc.y || 0;
+        lastZ = acc.z || 0;
+      }
+    };
+
+    window.addEventListener('devicemotion', handleMotion);
+    return () => window.removeEventListener('devicemotion', handleMotion);
+  }, [playerSettings.shakeToPlayNext, activeQueue, currentTrackId]);
+
+  // Car bluetooth / status bar lyrics sync
+  useEffect(() => {
+    if (!currentTrack) return;
+    if (playerSettings.statusBarLyrics !== 'off' && isPlaying) {
+      document.title = `▶ ${currentTrack.title} - ${currentTrack.artist}`;
+    } else {
+      document.title = 'Music Player';
+    }
+
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: currentTrack.title,
+        artist:
+          currentTrack.artist +
+          (playerSettings.carBluetoothLyrics && currentTrack.lyrics
+            ? ` | ${currentTrack.lyrics.slice(0, 50)}...`
+            : ''),
+        album: currentTrack.album,
+        artwork: [{ src: currentTrack.coverArt, sizes: '512x512', type: 'image/jpeg' }],
+      });
+    }
+  }, [currentTrack, isPlaying, playerSettings.statusBarLyrics, playerSettings.carBluetoothLyrics]);
 
   // Restore persistent device audio blobs & auto-scan phone folders on startup via MusicLibrary.scanSongs()
   useEffect(() => {
@@ -386,7 +507,7 @@ export default function App() {
 
     if (autoPlay) {
       try {
-        await audioEngine.play();
+        await audioEngine.play(playerSettings.playPauseFade);
         setIsPlaying(true);
       } catch (err) {
         console.warn('Play error:', err);
@@ -398,10 +519,10 @@ export default function App() {
     if (!currentTrack) return;
 
     if (isPlaying) {
-      audioEngine.pause();
+      audioEngine.pause(playerSettings.playPauseFade);
       setIsPlaying(false);
     } else {
-      await audioEngine.play();
+      await audioEngine.play(playerSettings.playPauseFade);
       setIsPlaying(true);
     }
   };
@@ -527,6 +648,80 @@ export default function App() {
       spread: 80,
       origin: { y: 0.7 },
     });
+  };
+
+  const handlePlayNext = (track: Track) => {
+    setActiveQueue((prev) => {
+      const idx = prev.findIndex((t) => t.id === currentTrackId);
+      const filtered = prev.filter((t) => t.id !== track.id);
+      if (idx === -1) {
+        return [track, ...filtered];
+      }
+      const newQueue = [...filtered];
+      const newIdx = newQueue.findIndex((t) => t.id === currentTrackId);
+      newQueue.splice(newIdx + 1, 0, track);
+      return newQueue;
+    });
+    setAutoSyncToast(`Playing next: "${track.title}"`);
+    setTimeout(() => setAutoSyncToast(null), 3000);
+  };
+
+  const handleEnqueue = (track: Track) => {
+    setActiveQueue((prev) => {
+      if (prev.some((t) => t.id === track.id)) {
+        return [...prev.filter((t) => t.id !== track.id), track];
+      }
+      return [...prev, track];
+    });
+    setAutoSyncToast(`Added to queue: "${track.title}"`);
+    setTimeout(() => setAutoSyncToast(null), 3000);
+  };
+
+  const handleUpdateTrackArtwork = (trackId: string, artworkUrl: string) => {
+    setTracks((prev) =>
+      prev.map((t) => (t.id === trackId ? { ...t, coverArt: artworkUrl } : t))
+    );
+    setActiveQueue((prev) =>
+      prev.map((t) => (t.id === trackId ? { ...t, coverArt: artworkUrl } : t))
+    );
+
+    // Update MediaSession if active
+    if (currentTrackId === trackId && 'mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: currentTrack?.title || '',
+        artist: currentTrack?.artist || '',
+        album: currentTrack?.album || '',
+        artwork: [{ src: artworkUrl, sizes: '512x512', type: 'image/jpeg' }],
+      });
+    }
+
+    setAutoSyncToast('Cover artwork updated successfully!');
+    setTimeout(() => setAutoSyncToast(null), 3000);
+  };
+
+  const handleShareTrack = async (track: Track) => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: track.title,
+          text: `Check out "${track.title}" by ${track.artist} on Sonance Music Player!`,
+          url: window.location.href,
+        });
+      } catch {
+        // user canceled
+      }
+    } else {
+      try {
+        await navigator.clipboard.writeText(
+          `Now playing: "${track.title}" by ${track.artist}`
+        );
+        setAutoSyncToast(`Copied track info to clipboard!`);
+        setTimeout(() => setAutoSyncToast(null), 3000);
+      } catch {
+        setAutoSyncToast(`Sharing: "${track.title}"`);
+        setTimeout(() => setAutoSyncToast(null), 3000);
+      }
+    }
   };
 
   const handleAddTracks = (newTracks: Track[]) => {
@@ -735,10 +930,16 @@ export default function App() {
     }
   }, [activeView, tracks, selectedPlaylistId, playlists]);
 
+  const activeThemeConfig = getThemeConfig(theme);
+
   return (
     <div
       id="sonance-app-root"
-      className="min-h-screen bg-black text-zinc-100 flex flex-col font-sans transition-colors duration-300"
+      style={{
+        backgroundColor: activeThemeConfig.bgCanvas,
+        color: activeThemeConfig.textPrimary,
+      }}
+      className="min-h-screen flex flex-col font-sans transition-colors duration-300"
     >
       {/* Drive Mode full screen replacement */}
       {activeView === 'drive_mode' ? (
@@ -776,6 +977,7 @@ export default function App() {
             offlineCount={offlineCount}
             totalTracks={tracks.length}
             isProUser={isProUser}
+            currentTheme={theme}
           />
 
           {/* Main Dynamic View Content */}
@@ -784,6 +986,9 @@ export default function App() {
               <HomeGrid
                 tracks={tracks}
                 playlists={playlists}
+                showShuffleButton={playerSettings.showShuffleButton}
+                accentColorHex={ACCENT_COLOR_MAP[playerSettings.accentColor]?.hex || '#f5b731'}
+                currentTheme={theme}
                 onSelectView={(v, plId) => {
                   setActiveView(v);
                   if (plId) setSelectedPlaylistId(plId);
@@ -795,6 +1000,11 @@ export default function App() {
                 onShuffleAll={() => handlePlayAll(tracks, true)}
                 onPlayTrack={(track) => loadAndPlayTrack(track, true)}
                 onOpenScanModal={() => setIsScanOpen(true)}
+                isProUser={isProUser}
+                onOpenRingtoneTrimmer={() => setIsRingtoneOpen(true)}
+                onOpenKaraokeStudio={() => setIsKaraokeStudioOpen(true)}
+                onOpenBeatInstrumental={() => setIsBeatInstrumentalOpen(true)}
+                onOpenProModal={() => setIsProModalOpen(true)}
               />
             ) : (
               <TrackList
@@ -818,6 +1028,8 @@ export default function App() {
                   setLyricsTrack(track);
                   setIsLyricsOpen(true);
                 }}
+                onOpenTrackActions={(track) => setActionMenuTrack(track)}
+                onOpenArtwork={(track) => setArtworkModalTrack(track)}
                 selectedPlaylist={
                   selectedPlaylistId
                     ? playlists.find((p) => p.id === selectedPlaylistId)
@@ -828,12 +1040,45 @@ export default function App() {
             )}
           </main>
 
+          {/* Floating Desktop Lyrics Overlay (when desktopLyrics is active & playing) */}
+          {playerSettings.desktopLyrics && isPlaying && currentTrack && (
+            <div
+              id="desktop-lyrics-float"
+              onClick={() => {
+                setLyricsTrack(currentTrack);
+                setIsLyricsOpen(true);
+              }}
+              className="fixed bottom-24 left-1/2 -translate-x-1/2 z-40 max-w-sm sm:max-w-md w-[90%] px-4 py-2 rounded-full bg-black/85 border border-zinc-700 shadow-2xl backdrop-blur-md flex items-center justify-between gap-2 text-center text-xs font-semibold text-white animate-in fade-in slide-in-from-bottom-2 duration-200 cursor-pointer hover:bg-black/95 transition-all"
+            >
+              <div
+                className="w-2 h-2 rounded-full animate-ping"
+                style={{ backgroundColor: ACCENT_COLOR_MAP[playerSettings.accentColor]?.hex || '#f5b731' }}
+              />
+              <span className="truncate flex-1">
+                {currentTrack.lyrics
+                  ? currentTrack.lyrics.split('\n')[0]
+                  : `♪ ${currentTrack.title} - ${currentTrack.artist} ♪`}
+              </span>
+              <span className="text-[9px] uppercase tracking-wider text-zinc-400 font-mono">
+                LYRICS
+              </span>
+            </div>
+          )}
+
+          {/* Ad Banner (Completely removed for Sonance Pro users) */}
+          <AdBanner
+            isProUser={isProUser}
+            onOpenProModal={() => setIsProModalOpen(true)}
+            position="bottom"
+          />
+
           {/* Bottom Mini Player */}
           <MiniPlayer
             currentTrack={currentTrack}
             isPlaying={isPlaying}
             currentTime={currentTime}
             duration={duration}
+            currentTheme={theme}
             onTogglePlay={handleTogglePlay}
             onNextTrack={handleNextTrack}
             onOpenFullPlayer={() => setIsFullPlayerOpen(true)}
@@ -844,6 +1089,15 @@ export default function App() {
           <Sidebar
             isOpen={isSidebarOpen}
             onClose={() => setIsSidebarOpen(false)}
+            playlists={playlists}
+            onSelectPlaylist={(plId) => {
+              setActiveView('playlist_detail');
+              setSelectedPlaylistId(plId);
+            }}
+            onOpenCreatePlaylist={() => {
+              setEditingPlaylist(null);
+              setIsPlaylistModalOpen(true);
+            }}
             onOpenScanModal={() => setIsScanOpen(true)}
             onOpenEqualizer={() => setIsEqOpen(true)}
             onOpenSleepTimer={() => setIsSleepTimerOpen(true)}
@@ -851,7 +1105,19 @@ export default function App() {
             onOpenSettings={() => setIsSettingsOpen(true)}
             onOpenRingtoneTrimmer={() => setIsRingtoneOpen(true)}
             onOpenProModal={() => setIsProModalOpen(true)}
-            onEnterDriveMode={() => setActiveView('drive_mode')}
+            onEnterDriveMode={() => {
+              setIsDriveSafetyModalOpen(true);
+            }}
+            onOpenWebBrowser={() => setIsWebBrowserOpen(true)}
+            onOpenWidgetModal={() => setIsWidgetOpen(true)}
+            onOpenHiddenFilesModal={() => setIsHiddenFilesOpen(true)}
+            onQuitApp={() => {
+              if (window.confirm('Are you sure you want to exit Music Player?')) {
+                audioEngine.pause();
+                setIsPlaying(false);
+                setIsSidebarOpen(false);
+              }
+            }}
             repeatMode={repeatMode}
             onToggleRepeat={handleToggleRepeat}
             currentTheme={theme}
@@ -876,6 +1142,9 @@ export default function App() {
             activeTrendingEffect={activeTrendingEffect}
             isKaraokeMode={isKaraokeMode}
             isProUser={isProUser}
+            forwardAndBackward={playerSettings.forwardAndBackward}
+            swipeToChangeSongs={playerSettings.swipeToChangeSongs}
+            accentColorHex={ACCENT_COLOR_MAP[playerSettings.accentColor]?.hex || '#f5b731'}
             onTogglePlay={handleTogglePlay}
             onPrevTrack={handlePrevTrack}
             onNextTrack={handleNextTrack}
@@ -897,6 +1166,8 @@ export default function App() {
               setIsLyricsOpen(true);
             }}
             onOpenQueue={() => setIsQueueOpen(true)}
+            onOpenArtwork={(track) => setArtworkModalTrack(track)}
+            onOpenTrackActions={(track) => setActionMenuTrack(track)}
           />
 
           {/* 10-Band Equalizer Modal */}
@@ -906,6 +1177,13 @@ export default function App() {
             settings={eqSettings}
             onChangeSettings={setEqSettings}
             isPlaying={isPlaying}
+            use10Bands={playerSettings.use10BandsEqualizer}
+            accentColorHex={ACCENT_COLOR_MAP[playerSettings.accentColor]?.hex || '#f5b731'}
+            isProUser={isProUser}
+            onOpenProModal={() => setIsProModalOpen(true)}
+            onToggle10Bands={(enable10) => {
+              handleUpdateSettings({ ...playerSettings, use10BandsEqualizer: enable10 });
+            }}
           />
 
           {/* Scan & Storage Modal */}
@@ -918,11 +1196,46 @@ export default function App() {
             isCachingAll={isCachingAll}
           />
 
-          {/* Ringtone & Audio Cutter Modal */}
+          {/* Ringtone & Audio Cutter / Batch ID3 Tag Editor Modal */}
           <RingtoneTrimmerModal
             isOpen={isRingtoneOpen}
             onClose={() => setIsRingtoneOpen(false)}
             track={currentTrack}
+            tracks={tracks}
+            isProUser={isProUser}
+            onOpenProModal={() => setIsProModalOpen(true)}
+            onUpdateTracks={(updated) => setTracks(updated)}
+          />
+
+          {/* AI Karaoke Studio Modal */}
+          <KaraokeStudioModal
+            isOpen={isKaraokeStudioOpen}
+            onClose={() => setIsKaraokeStudioOpen(false)}
+            tracks={tracks}
+            currentTrack={currentTrack}
+            isPlaying={isPlaying}
+            currentTime={currentTime}
+            isKaraokeMode={isKaraokeMode}
+            onToggleKaraoke={handleToggleKaraoke}
+            onPlayTrack={(track) => loadAndPlayTrack(track, true)}
+            onTogglePlay={handleTogglePlay}
+            onSeek={handleSeek}
+            currentTheme={theme}
+          />
+
+          {/* Beat Instrumental AI Stems (Paid Plan) Modal */}
+          <BeatInstrumentalModal
+            isOpen={isBeatInstrumentalOpen}
+            onClose={() => setIsBeatInstrumentalOpen(false)}
+            tracks={tracks}
+            currentTrack={currentTrack}
+            isPlaying={isPlaying}
+            isProUser={isProUser}
+            onOpenProModal={() => setIsProModalOpen(true)}
+            onPlayTrack={(track) => loadAndPlayTrack(track, true)}
+            onTogglePlay={handleTogglePlay}
+            onAddTrackToLibrary={(newTrack) => handleAddTracks([newTrack])}
+            currentTheme={theme}
           />
 
           {/* Monetization & Pro Upgrade Modal */}
@@ -1004,11 +1317,89 @@ export default function App() {
           <SettingsModal
             isOpen={isSettingsOpen}
             onClose={() => setIsSettingsOpen(false)}
-            hiFiMode={hiFiMode}
-            onToggleHiFi={() => setHiFiMode(!hiFiMode)}
+            settings={playerSettings}
+            onUpdateSettings={handleUpdateSettings}
+            tracks={tracks}
+            onRemoveDuplicateTracks={handleRemoveDuplicateTracks}
             onClearOfflineCache={handleClearOfflineCache}
             onResetAllData={handleResetAllData}
             offlineCount={offlineCount}
+          />
+
+          {/* Web Browser & Streaming Modal */}
+          <WebBrowserModal
+            isOpen={isWebBrowserOpen}
+            onClose={() => setIsWebBrowserOpen(false)}
+            onPlayStreamUrl={(streamTrack) => {
+              setTracks((prev) => [streamTrack, ...prev.filter((t) => t.id !== streamTrack.id)]);
+              loadAndPlayTrack(streamTrack, true);
+            }}
+          />
+
+          {/* Home Screen Widget & Lock Screen Player Modal */}
+          <WidgetModal
+            isOpen={isWidgetOpen}
+            onClose={() => setIsWidgetOpen(false)}
+            currentTrack={currentTrack}
+          />
+
+          {/* Hidden Files & .nomedia Scanner Modal */}
+          <HiddenFilesModal
+            isOpen={isHiddenFilesOpen}
+            onClose={() => setIsHiddenFilesOpen(false)}
+            tracks={tracks}
+            onAddTracks={handleAddTracks}
+          />
+
+          {/* 8-Option Action Menu Modal (Play next, Add to, Enqueue, Ringtone, Trim, Artwork, Share, Delete) */}
+          <TrackActionMenuModal
+            isOpen={!!actionMenuTrack}
+            onClose={() => setActionMenuTrack(null)}
+            track={actionMenuTrack}
+            playlists={playlists}
+            currentTheme={theme}
+            onPlayNext={handlePlayNext}
+            onEnqueue={handleEnqueue}
+            onAddToPlaylist={handleAddToPlaylist}
+            onCreatePlaylistWithTrack={(trackId) => {
+              setEditingPlaylist(null);
+              setIsPlaylistModalOpen(true);
+            }}
+            onOpenRingtone={(track) => {
+              setCurrentTrackId(track.id);
+              setIsRingtoneOpen(true);
+            }}
+            onOpenTrim={(track) => {
+              setCurrentTrackId(track.id);
+              setIsRingtoneOpen(true);
+            }}
+            onOpenArtwork={(track) => {
+              setArtworkModalTrack(track);
+            }}
+            onShare={handleShareTrack}
+            onDelete={(track) => {
+              handleDeleteTrack(track.id);
+            }}
+          />
+
+          {/* Artwork Upload & Camera Capture Modal */}
+          <ArtworkUploadModal
+            isOpen={!!artworkModalTrack}
+            onClose={() => setArtworkModalTrack(null)}
+            track={artworkModalTrack}
+            onSaveArtwork={handleUpdateTrackArtwork}
+          />
+
+          {/* Road Safety & Traffic Instruction Modal for Drive Mode */}
+          <DriveSafetyModal
+            isOpen={isDriveSafetyModalOpen}
+            onClose={() => setIsDriveSafetyModalOpen(false)}
+            onConfirmEnterDriveMode={() => {
+              setActiveView('drive_mode');
+              setIsSidebarOpen(false);
+              setIsFullPlayerOpen(false);
+            }}
+            currentTheme={theme}
           />
         </>
       )}

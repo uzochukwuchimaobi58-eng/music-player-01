@@ -1,5 +1,5 @@
 import { get, set, del } from 'idb-keyval';
-import { Track, Playlist, EqualizerSettings, AppTheme } from '../types';
+import { Track, Playlist, EqualizerSettings, AppTheme, PlayerSettings } from '../types';
 import { INITIAL_TRACKS, INITIAL_PLAYLISTS, EQ_PRESET_MAP } from '../data/defaultTracks';
 
 const STORAGE_KEYS = {
@@ -7,10 +7,51 @@ const STORAGE_KEYS = {
   PLAYLISTS: 'music_player_playlists',
   EQ_SETTINGS: 'music_player_eq',
   THEME: 'music_player_theme',
+  PLAYER_SETTINGS: 'music_player_settings_v1',
   VOLUME: 'music_player_volume',
   LAST_TRACK: 'music_player_last_track',
   RECENT_PLAYED: 'music_player_recent_played',
   OFFLINE_BLOB_PREFIX: 'offline_track_blob_',
+};
+
+export const DEFAULT_PLAYER_SETTINGS: PlayerSettings = {
+  use10BandsEqualizer: true,
+  showHiddenFiles: true,
+  showDirectories: false,
+  nightMode: true,
+  keepScreenOn: false,
+  showYouTubeSearchEntry: true,
+  forwardAndBackward: false,
+  queueAfterSearching: 'play_now',
+  showShuffleButton: 'floating_fab',
+  accentColor: 'gold',
+  libraryTabOrder: ['all', 'folder', 'album', 'artist', 'genre', 'favorite'],
+  desktopLyrics: false,
+  carBluetoothLyrics: true,
+  statusBarLyrics: 'off',
+  shakeToPlayNext: false,
+  swipeToChangeSongs: true,
+  allowOthersPlaying: false,
+  playPauseFade: false,
+  gaplessPlayback: false,
+};
+
+export const loadStoredPlayerSettings = (): PlayerSettings => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.PLAYER_SETTINGS);
+    if (!raw) return DEFAULT_PLAYER_SETTINGS;
+    return { ...DEFAULT_PLAYER_SETTINGS, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULT_PLAYER_SETTINGS;
+  }
+};
+
+export const saveStoredPlayerSettings = (settings: PlayerSettings) => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.PLAYER_SETTINGS, JSON.stringify(settings));
+  } catch (err) {
+    console.error('Failed to save player settings', err);
+  }
 };
 
 export const DEFAULT_EQ_SETTINGS: EqualizerSettings = {

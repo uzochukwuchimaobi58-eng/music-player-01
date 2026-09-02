@@ -40,20 +40,29 @@ export const DriveModeView: React.FC<DriveModeViewProps> = ({
       id="drive-mode-view"
       className="fixed inset-0 z-50 bg-[#050505] text-zinc-100 flex flex-col justify-between p-6 select-none animate-in zoom-in-95 duration-200 font-sans"
     >
-      {/* Top Bar: Exit button & Drive Mode indicator */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-300 text-xs font-bold uppercase tracking-wider">
-          <Car className="w-4 h-4 text-emerald-400" />
-          <span>Drive Mode (Hands-Safe)</span>
+      {/* Top Bar: Exit button & Drive Mode indicator & Safety reminder */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-300 text-xs font-bold uppercase tracking-wider">
+            <Car className="w-4 h-4 text-amber-400" />
+            <span>Drive Mode</span>
+          </div>
+
+          <button
+            onClick={onExitDriveMode}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-200 font-bold text-xs transition-colors cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+            <span>Exit</span>
+          </button>
         </div>
 
-        <button
-          onClick={onExitDriveMode}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-200 font-bold text-xs transition-colors cursor-pointer"
-        >
-          <X className="w-4 h-4" />
-          <span>Exit</span>
-        </button>
+        {/* Safety Instruction Banner */}
+        <div className="w-full bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-1.5 flex items-center justify-center gap-2 text-center">
+          <span className="text-[11px] font-bold text-amber-300">
+            ⚠️ Please obey the traffic and obey the rules with others instructions.
+          </span>
+        </div>
       </div>
 
       {/* Center Track Details & Large Artwork */}

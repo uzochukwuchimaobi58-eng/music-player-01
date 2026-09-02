@@ -185,12 +185,17 @@ class AudioEngineService {
     }
   }
 
-  public async play(): Promise<void> {
+  public async play(fade: boolean = false): Promise<void> {
     this.init();
     await this.resumeContext();
 
     if (this.audioElement && this.audioElement.src && !this.isSynthetic) {
       try {
+        if (fade && this.masterGain && this.audioCtx) {
+          const targetVol = this.audioElement.volume || 1;
+          this.masterGain.gain.setValueAtTime(0.001, this.audioCtx.currentTime);
+          this.masterGain.gain.linearRampToValueAtTime(targetVol, this.audioCtx.currentTime + 0.35);
+        }
         await this.audioElement.play();
         return;
       } catch (err) {
@@ -202,11 +207,25 @@ class AudioEngineService {
     }
   }
 
-  public pause() {
-    if (this.audioElement && !this.isSynthetic) {
-      this.audioElement.pause();
-    } else if (this.isSynthetic) {
-      this.pauseSynthetic();
+  public pause(fade: boolean = false) {
+    if (fade && this.masterGain && this.audioCtx && this.audioElement && !this.isSynthetic) {
+      const now = this.audioCtx.currentTime;
+      this.masterGain.gain.setValueAtTime(this.masterGain.gain.value || 1, now);
+      this.masterGain.gain.linearRampToValueAtTime(0.001, now + 0.3);
+      setTimeout(() => {
+        if (this.audioElement) {
+          this.audioElement.pause();
+          if (this.masterGain && this.audioCtx) {
+            this.masterGain.gain.setValueAtTime(this.audioElement.volume || 1, this.audioCtx.currentTime);
+          }
+        }
+      }, 300);
+    } else {
+      if (this.audioElement && !this.isSynthetic) {
+        this.audioElement.pause();
+      } else if (this.isSynthetic) {
+        this.pauseSynthetic();
+      }
     }
   }
 
@@ -355,6 +374,19 @@ class AudioEngineService {
       const reverbVal = settings.enabled ? (settings.spatialReverb / 100) * 0.45 : 0.15;
       this.reverbGain.gain.cancelScheduledValues(now);
       this.reverbGain.gain.linearRampToValueAtTime(reverbVal, now + 0.05);
+    }
+
+    // Tube Warmer (Analog Harmonics & Warmth at 250Hz - 500Hz)
+    if (settings.enabled && settings.tubeWarmer && settings.tubeWarmer > 0) {
+      const warmthDb = (settings.tubeWarmer / 100) * 4.5;
+      if (this.eqFilters[250]) {
+        const base = settings.bands[250] || 0;
+        this.eqFilters[250].gain.linearRampToValueAtTime(base + warmthDb, now + 0.05);
+      }
+      if (this.eqFilters[500]) {
+        const base = settings.bands[500] || 0;
+        this.eqFilters[500].gain.linearRampToValueAtTime(base + warmthDb * 0.7, now + 0.05);
+      }
     }
   }
 
