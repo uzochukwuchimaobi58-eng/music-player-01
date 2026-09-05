@@ -2,26 +2,67 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Affiliate Products Feed - Publicly readable by all app users worldwide
+    // Helper: Check if user is authenticated
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Helper: Check if authenticated user is the verified app owner/admin
+    function isOwner() {
+      return isSignedIn() && (
+        request.auth.token.email == 'uzochukwuchimaobi58@gmail.com' ||
+        request.auth.token.admin == true
+      );
+    }
+
+    // Validate product schema and reasonable payload sizes to prevent database abuse
+    function isValidProductData(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 100
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 200
+        && data.category is string && data.category.size() <= 100
+        && data.price is string && data.price.size() > 0 && data.price.size() <= 50
+        && data.affiliateUrl is string && data.affiliateUrl.size() > 0 && data.affiliateUrl.size() <= 2000
+        && (!('description' in data) || (data.description is string && data.description.size() <= 2000))
+        && (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 2000))
+        && (!('rating' in data) || (data.rating is number && data.rating >= 0 && data.rating <= 5))
+        && (!('isCustom' in data) || (data.isCustom is bool))
+        && (!('order' in data) || (data.order is number));
+    }
+
+    // Validate config data
+    function isValidConfigData(data) {
+      return (!('globalAffiliateTag' in data) || (data.globalAffiliateTag is string && data.globalAffiliateTag.size() <= 100))
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 100));
+    }
+
+    // Public affiliate products feed
     match /affiliate_products/{productId} {
+      // Any app user can safely read the gear feed
       allow read: if true;
-      allow write: if request.resource.data.id is string
-                   && request.resource.data.title is string
-                   && request.resource.data.price is string
-                   && request.resource.data.affiliateUrl is string;
-      allow delete: if true;
+
+      // Only verified app owner/admin can create or update products
+      allow create, update: if isOwner() && isValidProductData(request.resource.data);
+
+      // Only verified app owner/admin can delete products
+      allow delete: if isOwner();
     }
 
-    // Global Affiliate Configuration
+    // Global affiliate settings (e.g. Amazon tracking tag)
     match /affiliate_config/{configId} {
+      // Any app user can read global configuration
       allow read: if true;
-      allow write: if true;
+
+      // Only verified app owner/admin can change affiliate configuration
+      allow create, update: if isOwner() && isValidConfigData(request.resource.data);
+
+      // Deletion of global configuration is strictly blocked
+      allow delete: if false;
     }
 
-    // Connection test document
-    match /test/{docId} {
-      allow read: if true;
-      allow write: if true;
+    // Deny all other collections by default (blocks arbitrary writes or reads)
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
+
