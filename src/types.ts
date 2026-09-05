@@ -31,7 +31,7 @@ export interface Track {
   bitrate?: string;
   sampleRate?: string;
   fileSize?: string;
-  sourceType: 'built-in' | 'synthesized' | 'user-upload' | 'stream';
+  sourceType: 'built-in' | 'synthesized' | 'user-upload' | 'stream' | 'converted';
 }
 
 export interface Playlist {
@@ -137,4 +137,20 @@ export interface PlayerState {
   repeatMode: RepeatMode;
   playbackRate: number;
   hiFiMode: boolean;
+}
+
+export interface AffiliateProduct {
+  id: string;
+  title: string;
+  category: string;
+  price: string;
+  originalPrice?: string;
+  discountPercent?: string;
+  rating: number;
+  reviewsCount?: string;
+  description: string;
+  affiliateUrl: string;
+  imageUrl?: string;
+  badge?: string;
+  isCustom?: boolean;
 }

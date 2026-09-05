@@ -28,6 +28,7 @@ import {
   Camera,
   MoreVertical,
   Image as ImageIcon,
+  Subtitles,
 } from 'lucide-react';
 import { Track, RepeatMode } from '../types';
 import { TrendingAudioEffect } from '../services/audioEngine';
@@ -117,6 +118,26 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
 
   if (!isOpen || !currentTrack) return null;
+
+  // Dynamic Synchronized Captions based on currentTime
+  let currentCaptionText: string | null = null;
+  if (currentTrack.lyrics) {
+    const lines = currentTrack.lyrics.split('\n');
+    for (const line of lines) {
+      const match = line.match(/\[(\d{2}):(\d{2})(\.\d{2})?\](.*)/);
+      if (match) {
+        const min = parseInt(match[1], 10);
+        const sec = parseInt(match[2], 10);
+        const lineTime = min * 60 + sec;
+        if (currentTime >= lineTime) {
+          currentCaptionText = match[4].trim();
+        }
+      }
+    }
+    if (!currentCaptionText && lines.length > 0) {
+      currentCaptionText = lines[0].replace(/\[.*?\]/, '').trim();
+    }
+  }
 
   const handleTouchStart = (e: React.TouchEvent) => {
     if (!swipeToChangeSongs) return;
@@ -299,6 +320,21 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
               color="#ffffff"
               barCount={28}
             />
+          </div>
+
+          {/* Live Captions / Subtitle Bar */}
+          <div
+            onClick={onOpenLyrics}
+            className="w-full max-w-xs mt-2.5 px-3.5 py-1.5 rounded-2xl bg-zinc-900/90 border border-zinc-800 hover:border-amber-500/50 text-center cursor-pointer transition-all shadow-md group backdrop-blur-sm"
+            title="Tap to scan music or view live captions"
+          >
+            <div className="flex items-center justify-center gap-1.5 text-[10px] text-amber-400 font-bold uppercase tracking-wider mb-0.5">
+              <Subtitles className="w-3 h-3 animate-pulse" />
+              <span>Live Lyrics Captions</span>
+            </div>
+            <p className="text-xs font-semibold text-zinc-200 group-hover:text-amber-300 transition-colors line-clamp-1">
+              {currentCaptionText || 'Tap to Scan Music & Show Live Captions'}
+            </p>
           </div>
 
           {/* Viral FX & Tools Chips */}

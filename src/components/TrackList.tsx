@@ -64,6 +64,13 @@ export const TrackList: React.FC<TrackListProps> = ({
   const [playlistPickerTrackId, setPlaylistPickerTrackId] = useState<string | null>(null);
   const [filterQuery, setFilterQuery] = useState('');
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState<number>(60);
+  const sentinelRef = React.useRef<HTMLDivElement | null>(null);
+
+  // Reset pagination window when view or filters change
+  React.useEffect(() => {
+    setVisibleCount(60);
+  }, [view, selectedFolder, filterQuery, sortBy]);
 
   // Group by folder for Folder view
   const folderGroups = useMemo(() => {
@@ -101,13 +108,33 @@ export const TrackList: React.FC<TrackListProps> = ({
     );
   });
 
-  const sortedTracks = [...filtered].sort((a, b) => {
-    if (sortBy === 'title') return a.title.localeCompare(b.title);
-    if (sortBy === 'artist') return a.artist.localeCompare(b.artist);
-    if (sortBy === 'playCount') return (b.playCount || 0) - (a.playCount || 0);
-    if (sortBy === 'duration') return b.duration - a.duration;
-    return 0;
-  });
+  const sortedTracks = useMemo(() => {
+    return [...filtered].sort((a, b) => {
+      if (sortBy === 'title') return a.title.localeCompare(b.title);
+      if (sortBy === 'artist') return a.artist.localeCompare(b.artist);
+      if (sortBy === 'playCount') return (b.playCount || 0) - (a.playCount || 0);
+      if (sortBy === 'duration') return b.duration - a.duration;
+      return 0;
+    });
+  }, [filtered, sortBy]);
+
+  const visibleTracks = useMemo(() => {
+    return sortedTracks.slice(0, visibleCount);
+  }, [sortedTracks, visibleCount]);
+
+  React.useEffect(() => {
+    if (!sentinelRef.current) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisibleCount((prev) => Math.min(sortedTracks.length, prev + 50));
+        }
+      },
+      { rootMargin: '400px' }
+    );
+    observer.observe(sentinelRef.current);
+    return () => observer.disconnect();
+  }, [sortedTracks.length]);
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -260,7 +287,7 @@ export const TrackList: React.FC<TrackListProps> = ({
         </div>
       ) : (
         <div className="space-y-1.5">
-          {sortedTracks.map((track) => {
+          {visibleTracks.map((track) => {
             const isCurrent = currentTrackId === track.id;
             const isMenuOpen = menuOpenTrackId === track.id;
 
@@ -284,6 +311,7 @@ export const TrackList: React.FC<TrackListProps> = ({
                     <img
                       src={track.coverArt}
                       alt={track.title}
+                      loading="lazy"
                       referrerPolicy="no-referrer"
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                     />
@@ -394,6 +422,21 @@ export const TrackList: React.FC<TrackListProps> = ({
               </div>
             );
           })}
+
+          {/* High-Scale Infinite Scroll Sentinel (prevents browser crashes with thousands of downloads) */}
+          {visibleCount < sortedTracks.length && (
+            <div ref={sentinelRef} className="py-5 text-center flex flex-col items-center gap-2">
+              <button
+                onClick={() => setVisibleCount((prev) => Math.min(sortedTracks.length, prev + 100))}
+                className="px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs font-semibold text-zinc-300 transition-colors shadow-sm"
+              >
+                Load More ({visibleTracks.length} of {sortedTracks.length} displayed)
+              </button>
+              <span className="text-[10px] text-zinc-500 font-mono">
+                ⚡ Memory virtualization active ({sortedTracks.length} items loaded safely)
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>

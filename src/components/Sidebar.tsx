@@ -14,10 +14,12 @@ import {
   Plus,
   ChevronDown,
   ChevronRight,
-  Music2
+  Music2,
+  ShoppingBag
 } from 'lucide-react';
-import { RepeatMode, AppTheme, Playlist } from '../types';
+import { RepeatMode, AppTheme, Playlist, AffiliateProduct } from '../types';
 import { getThemeConfig } from '../data/themes';
+import { AffiliateBillboardHeader } from './AffiliateBillboardHeader';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -43,6 +45,9 @@ interface SidebarProps {
   sleepTimerRemaining: number | null; // in seconds
   offlineCount?: number;
   isProUser?: boolean;
+  affiliateProducts?: AffiliateProduct[];
+  onOpenAffiliateDealsModal?: () => void;
+  onSelectAffiliateProduct?: (product: AffiliateProduct) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -63,6 +68,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleRepeat,
   sleepTimerRemaining,
   currentTheme = 'dark-amoled',
+  affiliateProducts = [],
+  onOpenAffiliateDealsModal,
+  onSelectAffiliateProduct,
 }) => {
   const [isPlaylistsExpanded, setIsPlaylistsExpanded] = useState(true);
 
@@ -98,46 +106,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }}
         className="relative z-10 w-[290px] sm:w-[320px] h-full flex flex-col shadow-2xl overflow-y-auto animate-in slide-in-from-left duration-250 select-none font-sans transition-colors duration-300"
       >
-        {/* Top Header with Equalizer Graphic & Cursive "Music Player" Title */}
-        <div
-          style={{
-            backgroundColor: theme.sidebarHeaderBg,
-            borderColor: theme.headerBorder,
+        {/* Top Header: Music Gear Affiliate Billboard & Brand */}
+        <AffiliateBillboardHeader
+          products={affiliateProducts}
+          primaryColor={theme.accentColor}
+          onOpenDealsModal={() => {
+            onClose();
+            if (onOpenAffiliateDealsModal) onOpenAffiliateDealsModal();
           }}
-          className="relative pt-12 pb-6 px-6 border-b overflow-hidden flex flex-col justify-end min-h-[140px] transition-colors duration-300"
-        >
-          {/* Stylized Equalizer Background Sound Waves Graphic */}
-          <div className="absolute inset-0 flex items-end justify-between px-4 pb-2 opacity-15 pointer-events-none gap-1">
-            <div className="w-2.5 bg-zinc-400 h-10 rounded-t" />
-            <div className="w-2.5 bg-zinc-400 h-16 rounded-t" />
-            <div className="w-2.5 bg-zinc-400 h-24 rounded-t" />
-            <div className="w-2.5 bg-zinc-400 h-14 rounded-t" />
-            <div className="w-2.5 bg-zinc-400 h-28 rounded-t" />
-            <div className="w-2.5 bg-zinc-400 h-20 rounded-t" />
-            <div className="w-2.5 bg-zinc-400 h-12 rounded-t" />
-            <div className="w-2.5 bg-zinc-400 h-18 rounded-t" />
-            <div className="w-2.5 bg-zinc-400 h-8 rounded-t" />
-            <div className="w-2.5 bg-zinc-400 h-22 rounded-t" />
-            <div className="w-2.5 bg-zinc-400 h-16 rounded-t" />
-            <div className="w-2.5 bg-zinc-400 h-10 rounded-t" />
-          </div>
-
-          {/* Cursive "Music Player" Title (Matching Image 2 exactly) */}
-          <div className="relative z-10">
-            <h2
-              className="text-4xl text-white font-normal italic tracking-wide"
-              style={{
-                fontFamily: "'Dancing Script', 'Playfair Display', cursive, serif",
-                textShadow: '0 2px 10px rgba(0,0,0,0.5)',
-              }}
-            >
-              Music Player
-            </h2>
-          </div>
-        </div>
+          onSelectProduct={onSelectAffiliateProduct}
+        />
 
         {/* Menu Items List */}
         <div className="flex-1 py-2 px-3 space-y-0.5 overflow-y-auto">
+          {/* Featured Music Gear & Deals */}
+          <button
+            id="menu-affiliate-store"
+            onClick={() => handleItemClick(onOpenAffiliateDealsModal)}
+            className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition-all text-left cursor-pointer group mb-1"
+          >
+            <div className="flex items-center gap-3.5">
+              <div className="w-6 h-6 flex items-center justify-center text-amber-400 group-hover:scale-110 transition-transform">
+                <ShoppingBag className="w-5 h-5 stroke-[2]" />
+              </div>
+              <span className="text-sm font-semibold text-amber-300 group-hover:text-amber-200">
+                Music Gear Store
+              </span>
+            </div>
+            <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-500/25 text-amber-300 border border-amber-500/40">
+              DEALS
+            </span>
+          </button>
+
           {/* 1. Web Browser (Cleaned of AD badge) */}
           <button
             id="menu-web-browser"

@@ -139,6 +139,18 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Bottom Thin Persistent Progress Line (0 extra vertical space) */}
+      <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-zinc-800/40 pointer-events-none overflow-hidden">
+        <div
+          id="mini-player-bottom-progress"
+          className="h-full shadow-xs transition-all duration-150"
+          style={{
+            width: `${Math.min(100, Math.max(0, progressPercent))}%`,
+            backgroundColor: theme.accentColor,
+          }}
+        />
+      </div>
     </div>
   );
 };

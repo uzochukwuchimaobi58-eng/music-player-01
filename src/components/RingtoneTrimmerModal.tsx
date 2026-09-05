@@ -23,6 +23,7 @@ import {
   Image as ImageIcon
 } from 'lucide-react';
 import { Track } from '../types';
+import { trimAudioTrack, TrimResult, downloadBlobToPhone } from '../services/audioTrimmer';
 
 interface RingtoneTrimmerModalProps {
   isOpen: boolean;
@@ -32,6 +33,7 @@ interface RingtoneTrimmerModalProps {
   isProUser?: boolean;
   onOpenProModal?: () => void;
   onUpdateTracks?: (updatedTracks: Track[]) => void;
+  onAddTrackToLibrary?: (track: Track) => void;
 }
 
 export const RingtoneTrimmerModal: React.FC<RingtoneTrimmerModalProps> = ({
@@ -42,6 +44,7 @@ export const RingtoneTrimmerModal: React.FC<RingtoneTrimmerModalProps> = ({
   isProUser = false,
   onOpenProModal,
   onUpdateTracks,
+  onAddTrackToLibrary,
 }) => {
   const [activeTab, setActiveTab] = useState<'trimmer' | 'tag_editor'>('trimmer');
 
@@ -50,11 +53,14 @@ export const RingtoneTrimmerModal: React.FC<RingtoneTrimmerModalProps> = ({
   const [endTime, setEndTime] = useState(30);
   const [fadeIn, setFadeIn] = useState(true);
   const [fadeOut, setFadeOut] = useState(true);
-  const [exportFormat, setExportFormat] = useState<'mp3' | 'm4r' | 'wav'>('mp3');
+  const [exportFormat, setExportFormat] = useState<'mp3' | 'm4r' | 'wav'>('wav');
   const [isPlayingSnippet, setIsPlayingSnippet] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportSuccess, setExportSuccess] = useState<string | null>(null);
   const [ringtoneTarget, setRingtoneTarget] = useState<'ringtone' | 'alarm' | 'notification'>('ringtone');
+  const [trimmedResult, setTrimmedResult] = useState<TrimResult | null>(null);
+  const [isPlayingTrimmedAudio, setIsPlayingTrimmedAudio] = useState(false);
+  const trimmedAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // --- Batch Tag Editor States ---
   const [selectedTrackIds, setSelectedTrackIds] = useState<string[]>([]);
@@ -132,28 +138,57 @@ export const RingtoneTrimmerModal: React.FC<RingtoneTrimmerModalProps> = ({
     }
   };
 
-  const handleExportRingtone = () => {
-    if (!isProUser) {
-      setProAlert('High-Precision Ringtone Export is exclusive to Sonance Pro ($0.99/mo or $4.99/yr)');
-      if (onOpenProModal) {
-        setTimeout(() => onOpenProModal(), 500);
-      }
-      return;
+  const handleTogglePlayTrimmedAudio = () => {
+    if (!trimmedResult) return;
+    if (!trimmedAudioRef.current) {
+      trimmedAudioRef.current = new Audio(trimmedResult.objectUrl);
+      trimmedAudioRef.current.onended = () => setIsPlayingTrimmedAudio(false);
     }
+
+    if (isPlayingTrimmedAudio) {
+      trimmedAudioRef.current.pause();
+      setIsPlayingTrimmedAudio(false);
+    } else {
+      trimmedAudioRef.current.currentTime = 0;
+      trimmedAudioRef.current.play().then(() => {
+        setIsPlayingTrimmedAudio(true);
+      }).catch((err) => console.warn('Trimmed audio play error:', err));
+    }
+  };
+
+  const handleExportRingtone = async () => {
+    if (!track) return;
 
     setIsExporting(true);
     setExportSuccess(null);
 
-    // High precision DSP export simulation
-    setTimeout(() => {
-      setIsExporting(false);
+    try {
+      // Execute true client-side audio slicing and encoding
+      const result = await trimAudioTrack(track, startTime, endTime, {
+        fadeIn,
+        fadeOut,
+        format: exportFormat === 'wav' ? 'wav' : 'wav',
+      });
+
+      setTrimmedResult(result);
+
+      // Direct save to phone storage / Downloads folder
+      downloadBlobToPhone(result.blob, result.filename);
+
+      // Add to user's offline audio library
+      if (onAddTrackToLibrary) {
+        onAddTrackToLibrary(result.trimmedTrack);
+      }
+
       setExportSuccess(
-        `High-Precision ${exportFormat.toUpperCase()} Ringtone Exported! Set as ${ringtoneTarget.toUpperCase()} (${clipDuration}s)`
+        `Saved to phone! Downloaded "${result.filename}" (${result.duration}s) to device storage.`
       );
-      setTimeout(() => {
-        setExportSuccess(null);
-      }, 4000);
-    }, 1200);
+    } catch (err) {
+      console.error('Trimming audio failed:', err);
+      setExportSuccess('Trimming audio failed. Please try a different track or range.');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleToggleTrackSelection = (id: string) => {
@@ -473,6 +508,37 @@ export const RingtoneTrimmerModal: React.FC<RingtoneTrimmerModalProps> = ({
               </div>
             </div>
 
+            {/* Trimmed Result Preview & Download Card */}
+            {trimmedResult && (
+              <div className="p-3 rounded-xl bg-indigo-950/40 border border-indigo-500/30 space-y-2 animate-in fade-in">
+                <div className="flex items-center justify-between">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-bold text-indigo-200 truncate">{trimmedResult.filename}</p>
+                    <p className="text-[10px] text-zinc-400 mt-0.5">
+                      {trimmedResult.duration}s · 16-bit PCM WAV (High Quality Phone Audio)
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      onClick={handleTogglePlayTrimmedAudio}
+                      className="p-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+                      title={isPlayingTrimmedAudio ? 'Pause Trimmed Audio' : 'Play Trimmed Audio'}
+                    >
+                      {isPlayingTrimmedAudio ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current" />}
+                    </button>
+                    <button
+                      onClick={() => downloadBlobToPhone(trimmedResult.blob, trimmedResult.filename)}
+                      className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold flex items-center gap-1 transition-colors"
+                      title="Save file to phone"
+                    >
+                      <Download className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>Save Again</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Success toast */}
             {exportSuccess && (
               <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2 animate-in fade-in">
@@ -614,17 +680,17 @@ export const RingtoneTrimmerModal: React.FC<RingtoneTrimmerModalProps> = ({
               </button>
 
               <button
+                id="btn-save-trimmed-to-phone"
                 onClick={handleExportRingtone}
                 disabled={isExporting}
                 className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-300 hover:brightness-105 text-black font-bold text-xs flex items-center justify-center gap-2 shadow-lg transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
               >
                 {isExporting ? (
-                  <span className="animate-pulse">Encoding High-Precision Audio...</span>
+                  <span className="animate-pulse">Trimming Audio & Downloading...</span>
                 ) : (
                   <>
-                    {!isProUser && <Lock className="w-3.5 h-3.5" />}
                     <Download className="w-3.5 h-3.5" />
-                    <span>Export High-Precision Ringtone</span>
+                    <span>Save Trimmed Music to Phone</span>
                   </>
                 )}
               </button>

@@ -24,6 +24,7 @@ import {
   storeAudioBlobOffline,
   getAudioBlobOffline,
   removeAudioBlobOffline,
+  loadTracksFromIDB,
   DEFAULT_EQ_SETTINGS,
   DEFAULT_PLAYER_SETTINGS,
 } from './services/storage';
@@ -60,7 +61,10 @@ import { HiddenFilesModal } from './components/HiddenFilesModal';
 import { TrackActionMenuModal } from './components/TrackActionMenuModal';
 import { ArtworkUploadModal } from './components/ArtworkUploadModal';
 import { DriveSafetyModal } from './components/DriveSafetyModal';
-import { AdBanner } from './components/AdBanner';
+import { AffiliateDealsModal } from './components/AffiliateDealsModal';
+import { AffiliateProduct } from './types';
+import { loadAffiliateProducts } from './data/affiliateProducts';
+import { subscribeToCloudAffiliateProducts } from './services/affiliateService';
 
 export default function App() {
   // --- Persistent State ---
@@ -69,6 +73,10 @@ export default function App() {
   const [theme, setTheme] = useState<AppTheme>(() => loadStoredTheme());
   const [eqSettings, setEqSettings] = useState<EqualizerSettings>(() => loadStoredEq());
   const [playerSettings, setPlayerSettings] = useState<PlayerSettings>(() => loadStoredPlayerSettings());
+  const [affiliateProducts, setAffiliateProducts] = useState<AffiliateProduct[]>(() => loadAffiliateProducts());
+  const [isAffiliateDealsOpen, setIsAffiliateDealsOpen] = useState(false);
+  const [selectedAffiliateProduct, setSelectedAffiliateProduct] = useState<AffiliateProduct | null>(null);
+  const [isCloudConnected, setIsCloudConnected] = useState<boolean>(true);
   const [isProUser, setIsProUser] = useState<boolean>(() => {
     return localStorage.getItem('sonance_pro_active') === 'true';
   });
@@ -119,6 +127,30 @@ export default function App() {
   const [hiFiMode, setHiFiMode] = useState(true);
   const [activeTrendingEffect, setActiveTrendingEffect] = useState<TrendingAudioEffect>('normal');
   const [isKaraokeMode, setIsKaraokeMode] = useState(false);
+  const [pausedNextPressCount, setPausedNextPressCount] = useState<number>(0);
+
+  // Load tracks from IndexedDB asynchronously on mount to restore large libraries (thousands of downloads)
+  useEffect(() => {
+    loadTracksFromIDB().then((idbTracks) => {
+      if (idbTracks && idbTracks.length > 0) {
+        setTracks(idbTracks);
+      }
+    });
+  }, []);
+
+  // Real-time Cloud Feed subscription for Affiliate Billboard Products
+  useEffect(() => {
+    const unsubscribe = subscribeToCloudAffiliateProducts((cloudProducts, isConnected) => {
+      if (cloudProducts && cloudProducts.length > 0) {
+        setAffiliateProducts(cloudProducts);
+      }
+      setIsCloudConnected(isConnected);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   // --- Active Queue State ---
   const [activeQueue, setActiveQueue] = useState<Track[]>(() => tracks);
@@ -126,6 +158,7 @@ export default function App() {
   // --- Sleep Timer State ---
   const [sleepTimerRemaining, setSleepTimerRemaining] = useState<number | null>(null);
   const sleepTimerRef = useRef<number | null>(null);
+  const handleNextTrackRef = useRef<(forcePlay?: boolean) => void>(() => {});
 
   // Derive Current Track
   const currentTrack = useMemo(() => {
@@ -196,39 +229,58 @@ export default function App() {
     };
   }, [playerSettings.keepScreenOn]);
 
-  // Shake to play next song
+  // Shake to play next song (Strictly active ONLY when settings.shakeToPlayNext is true)
   useEffect(() => {
-    if (!playerSettings.shakeToPlayNext) return;
-    let lastX = 0;
-    let lastY = 0;
-    let lastZ = 0;
-    let lastTime = 0;
-    const threshold = 18;
+    if (!playerSettings.shakeToPlayNext) {
+      return;
+    }
+
+    let lastX: number | null = null;
+    let lastY: number | null = null;
+    let lastZ: number | null = null;
+    let lastShakeTime = 0;
+    const SHAKE_THRESHOLD = 24; // Intentional shake acceleration threshold in m/s^2
+    const COOLDOWN_MS = 1200; // Cooldown between shakes to prevent rapid unwanted triggers
 
     const handleMotion = (e: DeviceMotionEvent) => {
+      // Guard against stale state
+      if (!playerSettings.shakeToPlayNext) return;
+
       const acc = e.accelerationIncludingGravity;
-      if (!acc) return;
+      if (!acc || acc.x === null || acc.y === null || acc.z === null) return;
+
       const now = Date.now();
-      if (now - lastTime > 350) {
-        const diffTime = now - lastTime;
-        lastTime = now;
-        const speed =
-          (Math.abs((acc.x || 0) + (acc.y || 0) + (acc.z || 0) - lastX - lastY - lastZ) / diffTime) *
-          10000;
-        if (speed > threshold) {
-          handleNextTrack();
-          setAutoSyncToast('📳 Shake detected: Next Track');
-          setTimeout(() => setAutoSyncToast(null), 2000);
-        }
-        lastX = acc.x || 0;
-        lastY = acc.y || 0;
-        lastZ = acc.z || 0;
+      if (now - lastShakeTime < COOLDOWN_MS) return;
+
+      if (lastX === null || lastY === null || lastZ === null) {
+        lastX = acc.x;
+        lastY = acc.y;
+        lastZ = acc.z;
+        return;
+      }
+
+      const deltaX = Math.abs(acc.x - lastX);
+      const deltaY = Math.abs(acc.y - lastY);
+      const deltaZ = Math.abs(acc.z - lastZ);
+      const totalDelta = deltaX + deltaY + deltaZ;
+
+      lastX = acc.x;
+      lastY = acc.y;
+      lastZ = acc.z;
+
+      if (totalDelta > SHAKE_THRESHOLD) {
+        lastShakeTime = now;
+        handleNextTrackRef.current(true);
+        setAutoSyncToast('📳 Shake detected: Next Track');
+        setTimeout(() => setAutoSyncToast(null), 2000);
       }
     };
 
     window.addEventListener('devicemotion', handleMotion);
-    return () => window.removeEventListener('devicemotion', handleMotion);
-  }, [playerSettings.shakeToPlayNext, activeQueue, currentTrackId]);
+    return () => {
+      window.removeEventListener('devicemotion', handleMotion);
+    };
+  }, [playerSettings.shakeToPlayNext]);
 
   // Car bluetooth / status bar lyrics sync
   useEffect(() => {
@@ -355,47 +407,6 @@ export default function App() {
     };
   }, []);
 
-  // --- Shake to Shuffle Gesture Control ---
-  useEffect(() => {
-    let lastX = 0;
-    let lastY = 0;
-    let lastZ = 0;
-    let lastTime = 0;
-
-    const handleDeviceMotion = (event: DeviceMotionEvent) => {
-      const current = event.accelerationIncludingGravity;
-      if (!current) return;
-
-      const currentTime = Date.now();
-      if (currentTime - lastTime > 300) {
-        const diffTime = currentTime - lastTime;
-        lastTime = currentTime;
-
-        const deltaX = (current.x || 0) - lastX;
-        const deltaY = (current.y || 0) - lastY;
-        const deltaZ = (current.z || 0) - lastZ;
-
-        const speed = (Math.abs(deltaX + deltaY + deltaZ) / diffTime) * 10000;
-
-        if (speed > 800) {
-          // Shake detected -> trigger next track with shuffle
-          handleNextTrack();
-          setAutoSyncToast('📳 Shake to Next Track');
-          setTimeout(() => setAutoSyncToast(null), 2000);
-        }
-
-        lastX = current.x || 0;
-        lastY = current.y || 0;
-        lastZ = current.z || 0;
-      }
-    };
-
-    window.addEventListener('devicemotion', handleDeviceMotion);
-    return () => {
-      window.removeEventListener('devicemotion', handleDeviceMotion);
-    };
-  }, [activeQueue, currentTrackId]);
-
   // --- Audio Element Event Bindings ---
   useEffect(() => {
     audioEngine.init();
@@ -521,13 +532,15 @@ export default function App() {
     if (isPlaying) {
       audioEngine.pause(playerSettings.playPauseFade);
       setIsPlaying(false);
+      setPausedNextPressCount(0);
     } else {
       await audioEngine.play(playerSettings.playPauseFade);
       setIsPlaying(true);
+      setPausedNextPressCount(0);
     }
   };
 
-  const handleNextTrack = () => {
+  const handleNextTrack = (forcePlay: boolean = false) => {
     if (activeQueue.length === 0) return;
     const currentIndex = activeQueue.findIndex((t) => t.id === currentTrackId);
     let nextIndex = 0;
@@ -538,8 +551,24 @@ export default function App() {
       nextIndex = (currentIndex + 1) % activeQueue.length;
     }
 
-    loadAndPlayTrack(activeQueue[nextIndex], true);
+    const nextTrack = activeQueue[nextIndex];
+
+    // When paused and not forcing play:
+    // First tap on next cues track without playing; pressing another next starts playback
+    if (!isPlaying && !forcePlay) {
+      if (pausedNextPressCount === 0) {
+        setPausedNextPressCount(1);
+        loadAndPlayTrack(nextTrack, false);
+      } else {
+        setPausedNextPressCount(0);
+        loadAndPlayTrack(nextTrack, true);
+      }
+    } else {
+      setPausedNextPressCount(0);
+      loadAndPlayTrack(nextTrack, true);
+    }
   };
+  handleNextTrackRef.current = handleNextTrack;
 
   const handlePrevTrack = () => {
     if (activeQueue.length === 0) return;
@@ -547,7 +576,15 @@ export default function App() {
     let prevIndex = currentIndex - 1;
     if (prevIndex < 0) prevIndex = activeQueue.length - 1;
 
-    loadAndPlayTrack(activeQueue[prevIndex], true);
+    const prevTrack = activeQueue[prevIndex];
+
+    // When paused, navigating back cues track without playing
+    if (!isPlaying) {
+      setPausedNextPressCount(0);
+      loadAndPlayTrack(prevTrack, false);
+    } else {
+      loadAndPlayTrack(prevTrack, true);
+    }
   };
 
   const handleTrackEnd = () => {
@@ -558,14 +595,14 @@ export default function App() {
     }
 
     if (repeatMode === 'all') {
-      handleNextTrack();
+      handleNextTrack(true);
       return;
     }
 
     // Repeat off: stop at end of queue
     const currentIndex = activeQueue.findIndex((t) => t.id === currentTrackId);
     if (currentIndex < activeQueue.length - 1) {
-      handleNextTrack();
+      handleNextTrack(true);
     } else {
       setIsPlaying(false);
     }
@@ -967,6 +1004,7 @@ export default function App() {
             onOpenScanModal={() => setIsScanOpen(true)}
             onOpenProModal={() => setIsProModalOpen(true)}
             onOpenRingtoneTrimmer={() => setIsRingtoneOpen(true)}
+            onOpenAffiliateDealsModal={() => setIsAffiliateDealsOpen(true)}
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
             activeViewTitle={getViewTitle()}
@@ -989,6 +1027,9 @@ export default function App() {
                 showShuffleButton={playerSettings.showShuffleButton}
                 accentColorHex={ACCENT_COLOR_MAP[playerSettings.accentColor]?.hex || '#f5b731'}
                 currentTheme={theme}
+                affiliateProducts={affiliateProducts}
+                onOpenAffiliateDealsModal={() => setIsAffiliateDealsOpen(true)}
+                onSelectAffiliateProduct={(prod) => setSelectedAffiliateProduct(prod)}
                 onSelectView={(v, plId) => {
                   setActiveView(v);
                   if (plId) setSelectedPlaylistId(plId);
@@ -1004,6 +1045,7 @@ export default function App() {
                 onOpenRingtoneTrimmer={() => setIsRingtoneOpen(true)}
                 onOpenKaraokeStudio={() => setIsKaraokeStudioOpen(true)}
                 onOpenBeatInstrumental={() => setIsBeatInstrumentalOpen(true)}
+                onOpenEqualizer={() => setIsEqOpen(true)}
                 onOpenProModal={() => setIsProModalOpen(true)}
               />
             ) : (
@@ -1055,22 +1097,28 @@ export default function App() {
                 style={{ backgroundColor: ACCENT_COLOR_MAP[playerSettings.accentColor]?.hex || '#f5b731' }}
               />
               <span className="truncate flex-1">
-                {currentTrack.lyrics
-                  ? currentTrack.lyrics.split('\n')[0]
-                  : `♪ ${currentTrack.title} - ${currentTrack.artist} ♪`}
+                {(() => {
+                  if (!currentTrack.lyrics) return `♪ ${currentTrack.title} - ${currentTrack.artist} ♪`;
+                  const lines = currentTrack.lyrics.split('\n');
+                  let text = '';
+                  for (const line of lines) {
+                    const match = line.match(/\[(\d{2}):(\d{2})(\.\d{2})?\](.*)/);
+                    if (match) {
+                      const min = parseInt(match[1], 10);
+                      const sec = parseInt(match[2], 10);
+                      if (currentTime >= min * 60 + sec) {
+                        text = match[4].trim();
+                      }
+                    }
+                  }
+                  return text || lines[0].replace(/\[.*?\]/, '').trim() || `♪ ${currentTrack.title} ♪`;
+                })()}
               </span>
               <span className="text-[9px] uppercase tracking-wider text-zinc-400 font-mono">
-                LYRICS
+                CAPTION
               </span>
             </div>
           )}
-
-          {/* Ad Banner (Completely removed for Sonance Pro users) */}
-          <AdBanner
-            isProUser={isProUser}
-            onOpenProModal={() => setIsProModalOpen(true)}
-            position="bottom"
-          />
 
           {/* Bottom Mini Player */}
           <MiniPlayer
@@ -1124,6 +1172,12 @@ export default function App() {
             sleepTimerRemaining={sleepTimerRemaining}
             offlineCount={offlineCount}
             isProUser={isProUser}
+            affiliateProducts={affiliateProducts}
+            onOpenAffiliateDealsModal={() => setIsAffiliateDealsOpen(true)}
+            onSelectAffiliateProduct={(prod) => {
+              setSelectedAffiliateProduct(prod);
+              setIsAffiliateDealsOpen(true);
+            }}
           />
 
           {/* Full Screen Player Modal */}
@@ -1205,6 +1259,7 @@ export default function App() {
             isProUser={isProUser}
             onOpenProModal={() => setIsProModalOpen(true)}
             onUpdateTracks={(updated) => setTracks(updated)}
+            onAddTrackToLibrary={(newTrack) => handleAddTracks([newTrack])}
           />
 
           {/* AI Karaoke Studio Modal */}
@@ -1220,6 +1275,7 @@ export default function App() {
             onPlayTrack={(track) => loadAndPlayTrack(track, true)}
             onTogglePlay={handleTogglePlay}
             onSeek={handleSeek}
+            onAddTrackToLibrary={(newTrack) => handleAddTracks([newTrack])}
             currentTheme={theme}
           />
 
@@ -1278,6 +1334,9 @@ export default function App() {
             isKaraokeMode={isKaraokeMode}
             onToggleKaraoke={handleToggleKaraoke}
             onUpdateLyrics={handleUpdateLyrics}
+            onSeek={handleSeek}
+            isPlaying={isPlaying}
+            onTogglePlay={handleTogglePlay}
           />
 
           {/* Queue Modal */}
@@ -1400,6 +1459,16 @@ export default function App() {
               setIsFullPlayerOpen(false);
             }}
             currentTheme={theme}
+          />
+
+          {/* Affiliate Music Gear Billboard & Store Modal */}
+          <AffiliateDealsModal
+            isOpen={isAffiliateDealsOpen}
+            onClose={() => setIsAffiliateDealsOpen(false)}
+            products={affiliateProducts}
+            onUpdateProducts={(updated) => setAffiliateProducts(updated)}
+            selectedProduct={selectedAffiliateProduct}
+            isCloudConnected={isCloudConnected}
           />
         </>
       )}

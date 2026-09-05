@@ -1,0 +1,102 @@
+{
+  "entities": {
+    "AffiliateProduct": {
+      "title": "AffiliateProduct",
+      "description": "Trending music equipment and accessories displayed on the billboard for all app users.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique product identifier."
+        },
+        "title": {
+          "type": "string",
+          "description": "Name of the music gear or accessory."
+        },
+        "category": {
+          "type": "string",
+          "description": "Product category (e.g. Headphones, DACs, Mics)."
+        },
+        "price": {
+          "type": "string",
+          "description": "Display sales price."
+        },
+        "originalPrice": {
+          "type": "string",
+          "description": "Original retail price before discount."
+        },
+        "discountPercent": {
+          "type": "string",
+          "description": "Discount badge string (e.g. -50%)."
+        },
+        "rating": {
+          "type": "number",
+          "description": "User star rating (1.0 to 5.0)."
+        },
+        "reviewsCount": {
+          "type": "string",
+          "description": "Formatted number of online reviews (e.g. 24.8k)."
+        },
+        "description": {
+          "type": "string",
+          "description": "Short promotional description of key audio features."
+        },
+        "affiliateUrl": {
+          "type": "string",
+          "description": "Direct affiliate purchase URL."
+        },
+        "imageUrl": {
+          "type": "string",
+          "description": "High resolution product photo URL."
+        },
+        "badge": {
+          "type": "string",
+          "description": "Promotional tag such as BEST SELLER or TOP RATED."
+        },
+        "isCustom": {
+          "type": "boolean",
+          "description": "Flag indicating if added by app owner."
+        },
+        "order": {
+          "type": "number",
+          "description": "Display order index on the billboard carousel."
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp of last modification."
+        }
+      },
+      "required": ["id", "title", "category", "price", "affiliateUrl"]
+    },
+    "AffiliateConfig": {
+      "title": "AffiliateConfig",
+      "description": "Global affiliate configuration and tracking tags.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Configuration document ID."
+        },
+        "globalAffiliateTag": {
+          "type": "string",
+          "description": "Amazon Associates or partner tracking tag applied to all default links."
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp of last modification."
+        }
+      },
+      "required": ["id"]
+    }
+  },
+  "firestore": {
+    "/affiliate_products/{productId}": {
+      "schema": "AffiliateProduct",
+      "description": "Live cloud feed of affiliate audio products displayed to all users globally."
+    },
+    "/affiliate_config/{configId}": {
+      "schema": "AffiliateConfig",
+      "description": "Global settings such as affiliate partner tag."
+    }
+  }
+}

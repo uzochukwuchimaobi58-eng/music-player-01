@@ -58,9 +58,9 @@ export const DEFAULT_EQ_SETTINGS: EqualizerSettings = {
   enabled: true,
   preset: 'Hi-Fi Master',
   bands: { ...EQ_PRESET_MAP['Hi-Fi Master'] },
-  bassBoost: 35,
-  spatialReverb: 15,
-  trebleBoost: 25,
+  bassBoost: 20,
+  spatialReverb: 0,
+  trebleBoost: 15,
 };
 
 export const loadStoredTracks = (): Track[] => {
@@ -68,17 +68,64 @@ export const loadStoredTracks = (): Track[] => {
     const raw = localStorage.getItem(STORAGE_KEYS.TRACKS_METADATA);
     if (!raw) return INITIAL_TRACKS;
     const parsed: Track[] = JSON.parse(raw);
-    return parsed.length > 0 ? parsed : INITIAL_TRACKS;
+    if (!parsed || parsed.length === 0) return INITIAL_TRACKS;
+
+    // Migrate any legacy broken URLs (e.g. 403 Pixabay links) to valid, working streams
+    let hasMigrated = false;
+    const sanitized = parsed.map((track) => {
+      if (track.url && (track.url.includes('pixabay.com') || track.url.includes('403'))) {
+        hasMigrated = true;
+        const fallback = INITIAL_TRACKS.find((t) => t.id === track.id);
+        if (fallback) {
+          return { ...track, url: fallback.url, duration: fallback.duration };
+        }
+      }
+      return track;
+    });
+
+    if (hasMigrated) {
+      saveStoredTracks(sanitized);
+    }
+    return sanitized;
   } catch {
     return INITIAL_TRACKS;
   }
 };
 
-export const saveStoredTracks = (tracks: Track[]) => {
+const TRACKS_IDB_KEY = 'music_player_tracks_idb_v2';
+
+/**
+ * Loads the complete tracks collection from IndexedDB (handles thousands of tracks/downloads safely)
+ */
+export const loadTracksFromIDB = async (): Promise<Track[] | null> => {
   try {
-    localStorage.setItem(STORAGE_KEYS.TRACKS_METADATA, JSON.stringify(tracks));
+    const idbTracks = await get(TRACKS_IDB_KEY);
+    if (Array.isArray(idbTracks) && idbTracks.length > 0) {
+      return idbTracks;
+    }
+    return null;
   } catch (err) {
-    console.error('Failed to save tracks metadata', err);
+    console.warn('Failed to load tracks from IndexedDB:', err);
+    return null;
+  }
+};
+
+/**
+ * Saves tracks safely to IndexedDB (virtually unlimited capacity) with guarded localStorage fallback
+ * Prevents QuotaExceededError and app crashes when thousands of tracks/downloads are stored.
+ */
+export const saveStoredTracks = (tracks: Track[]) => {
+  // 1. Primary storage: IndexedDB (handles tens of thousands of downloads without crashing)
+  set(TRACKS_IDB_KEY, tracks).catch((err) => {
+    console.error('Failed to save tracks to IndexedDB', err);
+  });
+
+  // 2. Secondary lightweight cache: localStorage (capped to avoid QuotaExceededError crash)
+  try {
+    const cacheSubset = tracks.length > 80 ? tracks.slice(0, 80) : tracks;
+    localStorage.setItem(STORAGE_KEYS.TRACKS_METADATA, JSON.stringify(cacheSubset));
+  } catch (err) {
+    console.warn('localStorage quota reached or unavailable; tracks safely preserved in IndexedDB', err);
   }
 };
 
