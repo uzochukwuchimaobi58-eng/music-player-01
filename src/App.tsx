@@ -77,9 +77,7 @@ export default function App() {
   const [isAffiliateDealsOpen, setIsAffiliateDealsOpen] = useState(false);
   const [selectedAffiliateProduct, setSelectedAffiliateProduct] = useState<AffiliateProduct | null>(null);
   const [isCloudConnected, setIsCloudConnected] = useState<boolean>(true);
-  const [isProUser, setIsProUser] = useState<boolean>(() => {
-    return localStorage.getItem('sonance_pro_active') === 'true';
-  });
+  const [isProUser, setIsProUser] = useState<boolean>(true);
 
   // --- UI Navigation State ---
   const [activeView, setActiveView] = useState<ActiveView>('home');
@@ -1294,13 +1292,15 @@ export default function App() {
             currentTheme={theme}
           />
 
-          {/* Monetization & Pro Upgrade Modal */}
-          <MonetizationProModal
-            isOpen={isProModalOpen}
-            onClose={() => setIsProModalOpen(false)}
-            isProUser={isProUser}
-            onUpgradeToPro={handleUpgradeToPro}
-          />
+          {/* Monetization & Pro Upgrade Modal - Disabled for v1.0 Launch */}
+          {false && (
+            <MonetizationProModal
+              isOpen={isProModalOpen}
+              onClose={() => setIsProModalOpen(false)}
+              isProUser={isProUser}
+              onUpgradeToPro={handleUpgradeToPro}
+            />
+          )}
 
           {/* Playlist Creation / Edit Modal */}
           <PlaylistModal

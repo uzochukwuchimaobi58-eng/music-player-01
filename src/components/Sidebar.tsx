@@ -15,11 +15,9 @@ import {
   ChevronDown,
   ChevronRight,
   Music2,
-  ShoppingBag
 } from 'lucide-react';
 import { RepeatMode, AppTheme, Playlist, AffiliateProduct } from '../types';
 import { getThemeConfig } from '../data/themes';
-import { AffiliateBillboardHeader } from './AffiliateBillboardHeader';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -106,39 +104,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }}
         className="relative z-10 w-[290px] sm:w-[320px] h-full flex flex-col shadow-2xl overflow-y-auto animate-in slide-in-from-left duration-250 select-none font-sans transition-colors duration-300"
       >
-        {/* Top Header: Music Gear Affiliate Billboard & Brand */}
-        <AffiliateBillboardHeader
-          products={affiliateProducts}
-          primaryColor={theme.accentColor}
-          onOpenDealsModal={() => {
-            onClose();
-            if (onOpenAffiliateDealsModal) onOpenAffiliateDealsModal();
-          }}
-          onSelectProduct={onSelectAffiliateProduct}
-        />
+        {/* Top Header: Sonance Brand Header */}
+        <div
+          className="p-5 border-b flex items-center gap-3.5 select-none"
+          style={{ borderColor: theme.headerBorder }}
+        >
+          <div
+            className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-lg"
+            style={{ backgroundColor: `${theme.accentColor}25`, border: `1px solid ${theme.accentColor}40` }}
+          >
+            <Music2 className="w-6 h-6" style={{ color: theme.accentColor }} />
+          </div>
+          <div>
+            <h2 className="text-base font-bold tracking-tight text-white flex items-center gap-1.5">
+              <span>Sonance Music</span>
+            </h2>
+            <p className="text-xs text-zinc-400 font-medium">Lossless Audio Player</p>
+          </div>
+        </div>
 
         {/* Menu Items List */}
         <div className="flex-1 py-2 px-3 space-y-0.5 overflow-y-auto">
-          {/* Featured Music Gear & Deals */}
-          <button
-            id="menu-affiliate-store"
-            onClick={() => handleItemClick(onOpenAffiliateDealsModal)}
-            className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition-all text-left cursor-pointer group mb-1"
-          >
-            <div className="flex items-center gap-3.5">
-              <div className="w-6 h-6 flex items-center justify-center text-amber-400 group-hover:scale-110 transition-transform">
-                <ShoppingBag className="w-5 h-5 stroke-[2]" />
-              </div>
-              <span className="text-sm font-semibold text-amber-300 group-hover:text-amber-200">
-                Music Gear Store
-              </span>
-            </div>
-            <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-500/25 text-amber-300 border border-amber-500/40">
-              DEALS
-            </span>
-          </button>
-
-          {/* 1. Web Browser (Cleaned of AD badge) */}
+          {/* 1. Web Browser */}
           <button
             id="menu-web-browser"
             onClick={() => handleItemClick(onOpenWebBrowser)}

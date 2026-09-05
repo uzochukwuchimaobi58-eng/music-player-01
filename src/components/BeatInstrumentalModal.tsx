@@ -4,7 +4,6 @@ import {
   Disc3,
   Sliders,
   Sparkles,
-  Crown,
   Play,
   Pause,
   Download,

@@ -14,8 +14,6 @@ import {
   Share2,
   Tag,
   Layers,
-  Crown,
-  Lock,
   Music2,
   Check,
   Disc3,
@@ -69,7 +67,6 @@ export const RingtoneTrimmerModal: React.FC<RingtoneTrimmerModalProps> = ({
   const [batchGenre, setBatchGenre] = useState('');
   const [batchYear, setBatchYear] = useState('');
   const [tagSuccess, setTagSuccess] = useState<string | null>(null);
-  const [proAlert, setProAlert] = useState<string | null>(null);
 
   const snippetAudioRef = useRef<HTMLAudioElement | null>(null);
   const playCheckInterval = useRef<number | null>(null);
@@ -206,14 +203,6 @@ export const RingtoneTrimmerModal: React.FC<RingtoneTrimmerModalProps> = ({
   };
 
   const handleApplyBatchTags = () => {
-    if (!isProUser) {
-      setProAlert('Batch ID3 Tag Editor is exclusive to Sonance Pro ($0.99/mo or $4.99/yr)');
-      if (onOpenProModal) {
-        setTimeout(() => onOpenProModal(), 500);
-      }
-      return;
-    }
-
     if (selectedTrackIds.length === 0) {
       alert('Please select at least one track to batch edit tags.');
       return;
@@ -260,15 +249,9 @@ export const RingtoneTrimmerModal: React.FC<RingtoneTrimmerModalProps> = ({
                 <h3 className="text-sm font-bold text-white tracking-tight">
                   {activeTab === 'trimmer' ? 'High-Precision Trimmer & Ringtone' : 'Batch ID3 Tag Editor'}
                 </h3>
-                {isProUser ? (
-                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30 flex items-center gap-1">
-                    <Crown className="w-2.5 h-2.5" /> PRO
-                  </span>
-                ) : (
-                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-bold border border-amber-500/30 flex items-center gap-1">
-                    <Lock className="w-2.5 h-2.5" /> PRO ONLY
-                  </span>
-                )}
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 font-medium">
+                  Studio Tool
+                </span>
               </div>
               <p className="text-[10px] text-zinc-400">
                 {activeTab === 'trimmer'
@@ -311,25 +294,6 @@ export const RingtoneTrimmerModal: React.FC<RingtoneTrimmerModalProps> = ({
             <span>Batch ID3 Editor</span>
           </button>
         </div>
-
-        {/* Pro Alert Banner */}
-        {proAlert && (
-          <div className="mb-3 p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs flex items-center justify-between gap-2 animate-in fade-in">
-            <div className="flex items-center gap-2 truncate">
-              <Crown className="w-4 h-4 shrink-0 text-amber-400" />
-              <span className="truncate">{proAlert}</span>
-            </div>
-            <button
-              onClick={() => {
-                onClose();
-                onOpenProModal?.();
-              }}
-              className="px-2.5 py-1 rounded-lg bg-amber-400 text-black font-bold text-[10px] shrink-0 hover:bg-amber-300 cursor-pointer"
-            >
-              Upgrade ($0.99)
-            </button>
-          </div>
-        )}
 
         {/* Tab 1: High Precision Trimmer */}
         {activeTab === 'trimmer' && (
@@ -700,7 +664,6 @@ export const RingtoneTrimmerModal: React.FC<RingtoneTrimmerModalProps> = ({
               onClick={handleApplyBatchTags}
               className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-300 hover:brightness-105 text-black font-bold text-xs flex items-center justify-center gap-2 shadow-lg transition-all active:scale-95 cursor-pointer"
             >
-              {!isProUser && <Lock className="w-3.5 h-3.5" />}
               <Tag className="w-3.5 h-3.5" />
               <span>Apply ID3 Tags to {selectedTrackIds.length} Track(s)</span>
             </button>

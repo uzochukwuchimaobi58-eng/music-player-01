@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, Palette, Check, Moon, Sun, Sparkles, Crown, Lock } from 'lucide-react';
+import React from 'react';
+import { X, Palette, Check, Moon, Sun, Sparkles } from 'lucide-react';
 import { AppTheme } from '../types';
 import { THEMES, ThemeDefinition } from '../data/themes';
 
@@ -17,26 +17,12 @@ export const ThemeModal: React.FC<ThemeModalProps> = ({
   onClose,
   currentTheme,
   onSelectTheme,
-  isProUser = false,
-  onOpenProModal,
 }) => {
-  const [lockedToast, setLockedToast] = useState<string | null>(null);
-
   if (!isOpen) return null;
 
   const themeList: ThemeDefinition[] = Object.values(THEMES);
 
   const handleSelect = (th: ThemeDefinition) => {
-    if (th.isProOnly && !isProUser) {
-      setLockedToast(`"${th.name}" is an exclusive Pro theme. Upgrade to unlock OLED AMOLED & Custom Gradients!`);
-      if (onOpenProModal) {
-        setTimeout(() => {
-          onOpenProModal();
-        }, 600);
-      }
-      return;
-    }
-    setLockedToast(null);
     onSelectTheme(th.id);
   };
 
@@ -70,30 +56,10 @@ export const ThemeModal: React.FC<ThemeModalProps> = ({
           </button>
         </div>
 
-        {/* Locked Pro Alert Toast if attempted */}
-        {lockedToast && (
-          <div className="mx-4 mt-3 p-3 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs flex items-center justify-between gap-2 animate-in fade-in">
-            <div className="flex items-center gap-2">
-              <Crown className="w-4 h-4 shrink-0 text-amber-400" />
-              <span>{lockedToast}</span>
-            </div>
-            <button
-              onClick={() => {
-                onClose();
-                onOpenProModal?.();
-              }}
-              className="px-2.5 py-1 rounded-lg bg-amber-400 text-black font-bold text-[10px] shrink-0 hover:bg-amber-300 cursor-pointer"
-            >
-              Get Pro ($0.99/mo)
-            </button>
-          </div>
-        )}
-
         {/* Content with theme cards and mini 6-tile preview */}
         <div className="p-3 sm:p-4 overflow-y-auto space-y-3">
           {themeList.map((th) => {
             const isSelected = currentTheme === th.id;
-            const isLocked = th.isProOnly && !isProUser;
 
             return (
               <div
@@ -103,8 +69,6 @@ export const ThemeModal: React.FC<ThemeModalProps> = ({
                 className={`p-3.5 rounded-xl border transition-all cursor-pointer relative overflow-hidden group ${
                   isSelected
                     ? 'ring-2 ring-white border-transparent shadow-2xl scale-[1.01]'
-                    : isLocked
-                    ? 'border-zinc-800/80 hover:border-amber-500/40 bg-zinc-900/40'
                     : 'border-zinc-800 hover:border-zinc-700 bg-zinc-900/60'
                 }`}
                 style={{
@@ -127,17 +91,6 @@ export const ThemeModal: React.FC<ThemeModalProps> = ({
                         ) : (
                           <Sun className="w-3 h-3 text-amber-400" />
                         )}
-                        {th.isProOnly && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-gradient-to-r from-amber-500/20 to-amber-400/20 text-amber-300 border border-amber-500/30 font-bold uppercase tracking-wider flex items-center gap-1">
-                            <Crown className="w-2.5 h-2.5 text-amber-400" />
-                            {th.themeType === 'amoled' ? 'PRO OLED' : 'PRO GRADIENT'}
-                          </span>
-                        )}
-                        {!th.isProOnly && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 font-semibold uppercase tracking-wider">
-                            Free
-                          </span>
-                        )}
                       </div>
                       <p className="text-xs text-zinc-400">
                         {th.subtitle}
@@ -148,10 +101,6 @@ export const ThemeModal: React.FC<ThemeModalProps> = ({
                   {isSelected ? (
                     <div className="w-6 h-6 rounded-full bg-white text-black flex items-center justify-center shrink-0 shadow-md">
                       <Check className="w-3.5 h-3.5 stroke-[3]" />
-                    </div>
-                  ) : isLocked ? (
-                    <div className="w-6 h-6 rounded-full bg-zinc-800 border border-amber-500/40 text-amber-400 flex items-center justify-center shrink-0">
-                      <Lock className="w-3 h-3" />
                     </div>
                   ) : (
                     <div className="w-6 h-6 rounded-full border border-zinc-700 group-hover:border-zinc-500 flex items-center justify-center shrink-0 text-transparent">

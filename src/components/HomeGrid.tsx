@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import {
   Music,
   Folder,
@@ -9,14 +9,7 @@ import {
   Scissors,
   Mic2,
   Wand2,
-  Crown,
   Sparkles,
-  ShieldCheck,
-  Zap,
-  ShoppingBag,
-  ExternalLink,
-  Star,
-  Globe2,
   Settings,
   SlidersHorizontal,
 } from 'lucide-react';
@@ -62,25 +55,8 @@ export const HomeGrid: React.FC<HomeGridProps> = ({
   onOpenKaraokeStudio,
   onOpenBeatInstrumental,
   onOpenEqualizer,
-  onOpenProModal,
 }) => {
   const theme = getThemeConfig(currentTheme);
-
-  // Rotating Billboard State
-  const [billboardIndex, setBillboardIndex] = useState(0);
-
-  useEffect(() => {
-    if (!affiliateProducts || affiliateProducts.length <= 1) return;
-    const interval = setInterval(() => {
-      setBillboardIndex((prev) => (prev + 1) % affiliateProducts.length);
-    }, 4500);
-    return () => clearInterval(interval);
-  }, [affiliateProducts]);
-
-  const currentBillboardProduct =
-    affiliateProducts && affiliateProducts.length > 0
-      ? affiliateProducts[billboardIndex % affiliateProducts.length]
-      : null;
 
   // Compute counts (with default screenshot visual reference fallback if initial sample is small)
   const libraryCount = tracks.length >= 10 ? tracks.length : 1868;
@@ -280,7 +256,7 @@ export const HomeGrid: React.FC<HomeGridProps> = ({
         </button>
       </div>
 
-      {/* STUDIO & PRO TOOLS BOX SECTION (Replaced playlist section) */}
+      {/* STUDIO TOOLS BOX SECTION */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-3 px-1">
           <div className="flex items-center gap-2">
@@ -288,20 +264,9 @@ export const HomeGrid: React.FC<HomeGridProps> = ({
               className="text-sm font-semibold tracking-wider uppercase transition-colors"
               style={{ color: theme.textPrimary }}
             >
-              STUDIO & PRO TOOLS
+              STUDIO TOOLS
             </h2>
-            <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-500/20 text-amber-400 border border-amber-500/30">
-              VIP
-            </span>
           </div>
-
-          <button
-            onClick={onOpenProModal}
-            className="text-[11px] font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 transition-colors cursor-pointer"
-          >
-            <span>PRO PLANS</span>
-            <ChevronRight className="w-3.5 h-3.5" />
-          </button>
         </div>
 
         {/* 4 Box Grid for Studio Tools */}
@@ -362,7 +327,7 @@ export const HomeGrid: React.FC<HomeGridProps> = ({
             </div>
           </button>
 
-          {/* Card 3: Convert to Beat Instrumental (Paid Plan) */}
+          {/* Card 3: Convert to Beat Instrumental */}
           <button
             id="card-beat-instrumental"
             onClick={onOpenBeatInstrumental}
@@ -376,8 +341,8 @@ export const HomeGrid: React.FC<HomeGridProps> = ({
               <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30 shadow-sm">
                 <Wand2 className="w-5 h-5 stroke-[2.2]" />
               </div>
-              <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-gradient-to-r from-amber-500 to-amber-300 text-black shadow-xs">
-                PAID PLAN
+              <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                AI STEMS
               </span>
             </div>
             <div className="mt-2">
@@ -420,110 +385,6 @@ export const HomeGrid: React.FC<HomeGridProps> = ({
           </button>
         </div>
       </div>
-
-      {/* TRENDING MUSIC GEAR & AFFILIATE BILLBOARD (Positioned directly down of Beat Instrumental) */}
-      {currentBillboardProduct && (
-        <div className="mb-6 rounded-2xl bg-gradient-to-r from-amber-500/15 via-zinc-900 to-zinc-950 border border-amber-500/35 p-3.5 shadow-xl relative overflow-hidden group">
-          {/* Subtle gold glow */}
-          <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
-
-          {/* Top banner header row */}
-          <div className="flex items-center justify-between mb-2.5 pb-2 border-b border-zinc-800/80">
-            <div className="flex items-center gap-2">
-              <span className="flex items-center gap-1.5 text-xs font-bold text-amber-300 uppercase tracking-wider">
-                <ShoppingBag className="w-3.5 h-3.5 text-amber-400" />
-                Trending Music Gear
-              </span>
-              <span className="text-[9px] uppercase font-black px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                <Globe2 className="w-2.5 h-2.5" /> LIVE FEED
-              </span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {onOpenAffiliateDealsModal && (
-                <button
-                  id="btn-billboard-manage-gear"
-                  onClick={onOpenAffiliateDealsModal}
-                  className="text-[11px] font-semibold text-amber-400 hover:text-amber-300 flex items-center gap-0.5 transition-colors cursor-pointer"
-                >
-                  <span>Add / Manage Gear</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Product display */}
-          <div
-            className="flex items-center gap-3 cursor-pointer"
-            onClick={() => {
-              if (onSelectAffiliateProduct) onSelectAffiliateProduct(currentBillboardProduct);
-              if (onOpenAffiliateDealsModal) onOpenAffiliateDealsModal();
-            }}
-          >
-            {/* Image with discount badge */}
-            <div className="relative w-16 h-16 sm:w-18 sm:h-18 rounded-xl overflow-hidden bg-zinc-800 border border-zinc-700/60 shrink-0 flex items-center justify-center shadow-md">
-              {currentBillboardProduct.imageUrl ? (
-                <img
-                  src={currentBillboardProduct.imageUrl}
-                  alt={currentBillboardProduct.title}
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  loading="lazy"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <ShoppingBag className="text-zinc-500 w-8 h-8" />
-              )}
-              {currentBillboardProduct.discountPercent && (
-                <span className="absolute bottom-0 right-0 bg-red-600 text-white font-black text-[9px] px-1 py-0.5 rounded-tl">
-                  {currentBillboardProduct.discountPercent}
-                </span>
-              )}
-            </div>
-
-            {/* Info */}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5 mb-0.5">
-                <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wide truncate">
-                  {currentBillboardProduct.badge || currentBillboardProduct.category}
-                </span>
-                <span className="text-[10px] text-zinc-400 flex items-center gap-0.5">
-                  <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
-                  {currentBillboardProduct.rating}
-                </span>
-              </div>
-
-              <h4 className="text-xs sm:text-sm font-semibold text-white truncate group-hover:text-amber-300 transition-colors">
-                {currentBillboardProduct.title}
-              </h4>
-
-              <div className="flex items-center justify-between mt-1.5 gap-2">
-                <div className="flex items-baseline gap-1.5">
-                  <span className="text-sm sm:text-base font-extrabold text-emerald-400">
-                    {currentBillboardProduct.price}
-                  </span>
-                  {currentBillboardProduct.originalPrice && (
-                    <span className="text-[11px] text-zinc-500 line-through">
-                      {currentBillboardProduct.originalPrice}
-                    </span>
-                  )}
-                </div>
-
-                <a
-                  href={currentBillboardProduct.affiliateUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  className="flex items-center gap-1 px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-[11px] shadow-sm transition-all active:scale-95"
-                >
-                  <span>Check Deal</span>
-                  <ExternalLink className="w-3 h-3 stroke-[2.5]" />
-                </a>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Floating Action Button (FAB) - Shuffle button */}
       {showShuffleButton !== 'hidden' && (

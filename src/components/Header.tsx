@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Menu, Search, X, ShoppingBag, Sparkles } from 'lucide-react';
+import { Menu, Search, X } from 'lucide-react';
 import { AppTheme } from '../types';
 import { getThemeConfig } from '../data/themes';
 
@@ -25,7 +25,6 @@ export const Header: React.FC<HeaderProps> = ({
   onSearchChange,
   activeViewTitle,
   onBackToHome,
-  onOpenAffiliateDealsModal,
   currentTheme = 'dark-amoled',
 }) => {
   const [showSearchInput, setShowSearchInput] = useState(false);
@@ -108,21 +107,6 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            {onOpenAffiliateDealsModal && (
-              <button
-                id="btn-header-gear-store"
-                onClick={onOpenAffiliateDealsModal}
-                title="Manage & View Music Gear Deals"
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 transition-all active:scale-95 cursor-pointer shadow-xs"
-              >
-                <ShoppingBag className="w-3.5 h-3.5 stroke-[2.2] text-amber-400" />
-                <span className="text-xs font-bold tracking-tight">Music Gear</span>
-                <span className="text-[9px] font-black uppercase px-1 py-0.2 rounded bg-amber-500 text-black">
-                  NEW
-                </span>
-              </button>
-            )}
-
             <button
               id="btn-search-toggle"
               onClick={() => setShowSearchInput(true)}

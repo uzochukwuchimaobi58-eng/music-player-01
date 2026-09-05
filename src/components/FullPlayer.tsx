@@ -24,7 +24,6 @@ import {
   Zap,
   Mic2,
   MicOff,
-  Crown,
   Camera,
   MoreVertical,
   Image as ImageIcon,
@@ -215,20 +214,6 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
           </div>
 
           <div className="flex items-center gap-1 -mr-2">
-            {/* Pro Badge / Upgrade trigger */}
-            <button
-              onClick={onOpenProModal}
-              title="Upgrade to Pro"
-              className={`p-1.5 px-2.5 rounded-lg flex items-center gap-1 text-xs font-bold transition-all cursor-pointer ${
-                isProUser
-                  ? 'bg-amber-500/15 border border-amber-500/30 text-amber-400'
-                  : 'bg-gradient-to-r from-amber-400 to-amber-500 text-black shadow-md active:scale-95'
-              }`}
-            >
-              <Crown className="w-3.5 h-3.5 fill-current" />
-              <span>{isProUser ? 'PRO' : 'GO PRO'}</span>
-            </button>
-
             <button
               onClick={onOpenEqualizer}
               title="Equalizer"
