@@ -6,6 +6,8 @@ workflows:
     environment:
       node: latest
       java: 21
+      android_signing:
+        - sonance music
     scripts:
       - name: Install dependencies
         script: |
@@ -19,11 +21,92 @@ workflows:
         script: |
           npx cap sync android
 
+      - name: Set up Keystore & Signing Properties
+        script: |
+          set -e
+          echo "Setting up Android keystore..."
+
+          # Determine keystore file path
+          KEYSTORE_FILE="/tmp/sonance_release.keystore"
+
+          if [ -n "$CM_KEYSTORE_PATH" ] && [ -f "$CM_KEYSTORE_PATH" ]; then
+            echo "Using Codemagic keystore at: $CM_KEYSTORE_PATH"
+            KEYSTORE_FILE="$CM_KEYSTORE_PATH"
+          elif [ -n "$CM_KEYSTORE" ]; then
+            echo "Decoding CM_KEYSTORE base64 into $KEYSTORE_FILE..."
+            echo "$CM_KEYSTORE" | base64 --decode > "$KEYSTORE_FILE"
+          elif [ -n "$KEYSTORE_BASE64" ]; then
+            echo "Decoding KEYSTORE_BASE64 into $KEYSTORE_FILE..."
+            echo "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_FILE"
+          fi
+
+          # Resolve passwords and alias
+          STORE_PASS="${CM_KEYSTORE_PASSWORD:-$KEYSTORE_PASSWORD}"
+          ALIAS="${CM_KEY_ALIAS:-$KEY_ALIAS}"
+          KEY_PASS="${CM_KEY_PASSWORD:-$KEY_PASSWORD}"
+
+          if [ -f "$KEYSTORE_FILE" ] && [ -n "$STORE_PASS" ] && [ -n "$ALIAS" ]; then
+            echo "Writing android/key.properties..."
+            cat <<EOF > android/key.properties
+storeFile=$KEYSTORE_FILE
+storePassword=$STORE_PASS
+keyAlias=$ALIAS
+keyPassword=${KEY_PASS:-$STORE_PASS}
+EOF
+            echo "android/key.properties created successfully."
+          else
+            echo "WARNING: Keystore variables not fully set. Check CM_KEYSTORE / CM_KEYSTORE_PASSWORD / CM_KEY_ALIAS."
+          fi
+
       - name: Build Android Release (AAB)
         script: |
           cd android
           chmod +x gradlew
-          ./gradlew bundleRelease
+          ./gradlew bundleRelease --stacktrace
+
+      - name: Verify and Sign AAB with jarsigner (Guaranteed Signed Bundle)
+        script: |
+          set -e
+          BUNDLE_DIR="android/app/build/outputs/bundle/release"
+          KEYSTORE_FILE="/tmp/sonance_release.keystore"
+          if [ -n "$CM_KEYSTORE_PATH" ] && [ -f "$CM_KEYSTORE_PATH" ]; then
+            KEYSTORE_FILE="$CM_KEYSTORE_PATH"
+          fi
+
+          STORE_PASS="${CM_KEYSTORE_PASSWORD:-$KEYSTORE_PASSWORD}"
+          ALIAS="${CM_KEY_ALIAS:-$KEY_ALIAS}"
+          KEY_PASS="${CM_KEY_PASSWORD:-$KEY_PASSWORD:-$STORE_PASS}"
+
+          # Find the generated AAB
+          AAB_FILE=$(find "$BUNDLE_DIR" -name "*.aab" | head -n 1)
+
+          if [ -z "$AAB_FILE" ]; then
+            echo "ERROR: No .aab file found in $BUNDLE_DIR!"
+            exit 1
+          fi
+
+          echo "Found bundle: $AAB_FILE"
+
+          # Check if already signed
+          if jarsigner -verify "$AAB_FILE" >/dev/null 2>&1; then
+            echo "SUCCESS: Bundle is already signed by Gradle!"
+          else
+            echo "Bundle is unsigned. Signing with jarsigner..."
+            if [ -f "$KEYSTORE_FILE" ] && [ -n "$STORE_PASS" ] && [ -n "$ALIAS" ]; then
+              jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
+                -keystore "$KEYSTORE_FILE" \
+                -storepass "$STORE_PASS" \
+                -keypass "$KEY_PASS" \
+                "$AAB_FILE" \
+                "$ALIAS"
+              echo "Verification after signing:"
+              jarsigner -verify -verbose "$AAB_FILE"
+              echo "SUCCESS: Bundle has been digitally signed!"
+            else
+              echo "ERROR: Keystore credentials missing. Cannot sign bundle!"
+              exit 1
+            fi
+          fi
 
     artifacts:
       - android/app/build/outputs/bundle/release/*.aab

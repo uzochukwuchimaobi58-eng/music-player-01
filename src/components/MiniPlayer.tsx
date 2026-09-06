@@ -9,6 +9,7 @@ interface MiniPlayerProps {
   currentTime: number;
   duration: number;
   currentTheme?: AppTheme;
+  isLibraryMode?: boolean;
   onTogglePlay: () => void;
   onNextTrack: () => void;
   onOpenFullPlayer: () => void;
@@ -21,6 +22,7 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
   currentTime,
   duration,
   currentTheme = 'dark-amoled',
+  isLibraryMode = false,
   onTogglePlay,
   onNextTrack,
   onOpenFullPlayer,
@@ -39,10 +41,10 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
         borderColor: theme.miniPlayerBorder,
         color: theme.textPrimary,
       }}
-      className="fixed bottom-0 left-0 right-0 z-40 border-t select-none shadow-2xl transition-colors duration-300 font-sans"
+      className="fixed bottom-0 left-0 right-0 z-40 border-t select-none shadow-2xl transition-colors duration-300 font-sans backdrop-blur-md"
     >
       {/* Top Precision Progress Line */}
-      <div className="relative w-full h-[2px] bg-zinc-800/80">
+      <div className="relative w-full h-[2.5px] bg-black/40">
         <div
           id="mini-player-progress"
           className="h-full shadow-xs transition-all duration-150"

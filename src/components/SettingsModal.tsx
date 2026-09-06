@@ -28,8 +28,10 @@ import {
   ShuffleButtonVisibility,
   StatusBarLyricsMode,
   LibraryTabKey,
-  Track
+  Track,
+  AppTheme
 } from '../types';
+import { THEMES } from '../data/themes';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -41,6 +43,8 @@ interface SettingsModalProps {
   onClearOfflineCache: () => void;
   onResetAllData: () => void;
   offlineCount: number;
+  currentTheme?: AppTheme;
+  onOpenThemeModal?: () => void;
 }
 
 export const ACCENT_COLOR_MAP: Record<AccentColor, { name: string; hex: string; bgClass: string; textClass: string; borderClass: string }> = {
@@ -71,6 +75,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClearOfflineCache,
   onResetAllData,
   offlineCount,
+  currentTheme = 'dark-amoled',
+  onOpenThemeModal,
 }) => {
   // Sub-dialog states
   const [activeSubDialog, setActiveSubDialog] = useState<
@@ -90,6 +96,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   if (!isOpen) return null;
 
   const currentAccent = ACCENT_COLOR_MAP[settings.accentColor] || ACCENT_COLOR_MAP.gold;
+  const currentThemeDef = THEMES[currentTheme] || THEMES['dark-amoled'];
 
   // Toggle switch helper
   const handleToggle = (key: keyof PlayerSettings) => {
@@ -358,7 +365,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <ChevronRight className="w-5 h-5 text-zinc-500 shrink-0" />
           </div>
 
-          {/* 11. Accent color */}
+          {/* 11. Themes & UI Styles (Selectable and applies dynamically from settings) */}
+          <div
+            id="setting-row-themes"
+            onClick={() => onOpenThemeModal && onOpenThemeModal()}
+            className={`px-4 py-3 flex items-center justify-between cursor-pointer transition-colors ${
+              settings.nightMode ? 'hover:bg-zinc-800/40' : 'hover:bg-zinc-200/60'
+            }`}
+          >
+            <div className="pr-4">
+              <p className="text-sm font-normal">Themes & UI Styles</p>
+              <p className="text-xs text-zinc-500 mt-0.5">
+                {currentThemeDef.name} ({currentThemeDef.isDark ? 'Dark' : 'Light'})
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <div
+                className="w-4 h-4 rounded-full border border-white/30"
+                style={{ backgroundColor: currentThemeDef.accentColor }}
+              />
+              <ChevronRight className="w-5 h-5 text-zinc-500 shrink-0" />
+            </div>
+          </div>
+
+          {/* 12. Accent color */}
           <div
             id="setting-row-accentcolor"
             onClick={() => setActiveSubDialog('accent_color')}

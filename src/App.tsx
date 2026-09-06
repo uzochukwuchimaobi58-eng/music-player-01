@@ -62,6 +62,7 @@ import { TrackActionMenuModal } from './components/TrackActionMenuModal';
 import { ArtworkUploadModal } from './components/ArtworkUploadModal';
 import { DriveSafetyModal } from './components/DriveSafetyModal';
 import { AffiliateDealsModal } from './components/AffiliateDealsModal';
+import { LibraryView } from './components/LibraryView';
 import { AffiliateProduct } from './types';
 import { loadAffiliateProducts } from './data/affiliateProducts';
 import { subscribeToCloudAffiliateProducts } from './services/affiliateService';
@@ -167,6 +168,17 @@ export default function App() {
   const offlineCount = useMemo(() => {
     return tracks.filter((t) => t.isOffline).length;
   }, [tracks]);
+
+  // Check if currently inside Library Tracks or Folder view
+  const isInsideLibraryOrFolder = activeView === 'library' || activeView === 'folder';
+
+  // Strict User Mandate: Completely suppress and block all Ad pop-ups when inside Library / Folder
+  useEffect(() => {
+    if (isInsideLibraryOrFolder) {
+      setIsAffiliateDealsOpen(false);
+      setIsProModalOpen(false);
+    }
+  }, [isInsideLibraryOrFolder]);
 
   // Sync state to local storage
   useEffect(() => {
@@ -996,29 +1008,50 @@ export default function App() {
         />
       ) : (
         <>
-          {/* Main Sticky Header */}
-          <Header
-            onOpenSidebar={() => setIsSidebarOpen(true)}
-            onOpenScanModal={() => setIsScanOpen(true)}
-            onOpenProModal={() => setIsProModalOpen(true)}
-            onOpenRingtoneTrimmer={() => setIsRingtoneOpen(true)}
-            onOpenAffiliateDealsModal={() => setIsAffiliateDealsOpen(true)}
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            activeViewTitle={getViewTitle()}
-            onBackToHome={() => {
-              setActiveView('home');
-              setSelectedPlaylistId(null);
-            }}
-            offlineCount={offlineCount}
-            totalTracks={tracks.length}
-            isProUser={isProUser}
-            currentTheme={theme}
-          />
+          {/* Main Sticky Header (Hidden when inside Library or Folder view, as LibraryView renders its own dedicated header matching the screenshot) */}
+          {!isInsideLibraryOrFolder && (
+            <Header
+              onOpenSidebar={() => setIsSidebarOpen(true)}
+              onOpenScanModal={() => setIsScanOpen(true)}
+              onOpenProModal={() => setIsProModalOpen(true)}
+              onOpenRingtoneTrimmer={() => setIsRingtoneOpen(true)}
+              onOpenAffiliateDealsModal={() => setIsAffiliateDealsOpen(true)}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              activeViewTitle={getViewTitle()}
+              onBackToHome={() => {
+                setActiveView('home');
+                setSelectedPlaylistId(null);
+              }}
+              offlineCount={offlineCount}
+              totalTracks={tracks.length}
+              isProUser={isProUser}
+              currentTheme={theme}
+            />
+          )}
 
           {/* Main Dynamic View Content */}
           <main className="flex-1 overflow-y-auto">
-            {activeView === 'home' ? (
+            {isInsideLibraryOrFolder ? (
+              <LibraryView
+                tracks={tracks}
+                currentTrackId={currentTrackId}
+                isPlaying={isPlaying}
+                initialTab={activeView === 'folder' ? 'folders' : 'tracks'}
+                onBackToHome={() => {
+                  setActiveView('home');
+                  setSelectedPlaylistId(null);
+                }}
+                onPlayTrack={(track) => loadAndPlayTrack(track, true)}
+                onPlayAll={handlePlayAll}
+                onOpenTrackActions={(track) => setActionMenuTrack(track)}
+                onOpenEqualizer={() => setIsEqOpen(true)}
+                onOpenScanModal={() => setIsScanOpen(true)}
+                onOpenSleepTimer={() => setIsSleepTimerOpen(true)}
+                onOpenThemeModal={() => setIsThemeOpen(true)}
+                currentTheme={theme}
+              />
+            ) : activeView === 'home' ? (
               <HomeGrid
                 tracks={tracks}
                 playlists={playlists}
@@ -1125,6 +1158,7 @@ export default function App() {
             currentTime={currentTime}
             duration={duration}
             currentTheme={theme}
+            isLibraryMode={isInsideLibraryOrFolder}
             onTogglePlay={handleTogglePlay}
             onNextTrack={handleNextTrack}
             onOpenFullPlayer={() => setIsFullPlayerOpen(true)}
@@ -1383,6 +1417,10 @@ export default function App() {
             onClearOfflineCache={handleClearOfflineCache}
             onResetAllData={handleResetAllData}
             offlineCount={offlineCount}
+            currentTheme={theme}
+            onOpenThemeModal={() => {
+              setIsThemeOpen(true);
+            }}
           />
 
           {/* Web Browser & Streaming Modal */}
@@ -1461,9 +1499,9 @@ export default function App() {
             currentTheme={theme}
           />
 
-          {/* Affiliate Music Gear Billboard & Store Modal */}
+          {/* Affiliate Music Gear Billboard & Store Modal - Strictly suppressed in Library / Folder view */}
           <AffiliateDealsModal
-            isOpen={isAffiliateDealsOpen}
+            isOpen={isAffiliateDealsOpen && !isInsideLibraryOrFolder}
             onClose={() => setIsAffiliateDealsOpen(false)}
             products={affiliateProducts}
             onUpdateProducts={(updated) => setAffiliateProducts(updated)}
