@@ -34,6 +34,8 @@ export const DEFAULT_PLAYER_SETTINGS: PlayerSettings = {
   allowOthersPlaying: false,
   playPauseFade: false,
   gaplessPlayback: false,
+  useEnglishLanguage: true,
+  hideUpdateReminder: false,
 };
 
 export const loadStoredPlayerSettings = (): PlayerSettings => {

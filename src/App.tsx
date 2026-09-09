@@ -32,6 +32,7 @@ import {
   restoreTrackBlobUrls,
   autoScanStoredDirectory,
   scanAudioFiles,
+  checkForNewDownloads,
 } from './services/deviceScanner';
 import { audioEngine, TrendingAudioEffect } from './services/audioEngine';
 import { getThemeConfig } from './data/themes';
@@ -63,12 +64,14 @@ import { ArtworkUploadModal } from './components/ArtworkUploadModal';
 import { DriveSafetyModal } from './components/DriveSafetyModal';
 import { AffiliateDealsModal } from './components/AffiliateDealsModal';
 import { LibraryView } from './components/LibraryView';
+import { WelcomeSplashScreen } from './components/WelcomeSplashScreen';
 import { AffiliateProduct } from './types';
 import { loadAffiliateProducts } from './data/affiliateProducts';
 import { subscribeToCloudAffiliateProducts } from './services/affiliateService';
 
 export default function App() {
   // --- Persistent State ---
+  const [showWelcome, setShowWelcome] = useState<boolean>(true);
   const [tracks, setTracks] = useState<Track[]>(() => loadStoredTracks());
   const [playlists, setPlaylists] = useState<Playlist[]>(() => loadStoredPlaylists());
   const [theme, setTheme] = useState<AppTheme>(() => loadStoredTheme());
@@ -333,7 +336,7 @@ export default function App() {
               album: s.album,
               duration: Math.max(1, Math.round((s.duration || 0) / 1000)),
               url: s.uri,
-              coverArt: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&q=80',
+              coverArt: s.artwork || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&q=80',
               folder: s.album || 'Phone Music',
               isFavorite: false,
               playCount: 0,
@@ -417,48 +420,119 @@ export default function App() {
     };
   }, []);
 
-  // --- Audio Element Event Bindings ---
+  // Keep tracks ref in sync for async auto-detection handlers
+  const tracksRef = useRef<Track[]>(tracks);
+  useEffect(() => {
+    tracksRef.current = tracks;
+  }, [tracks]);
+
+  const lastAutoScanTimeRef = useRef<number>(0);
+
+  // Auto-detect newly downloaded music when switching back to Music Player from Chrome or online
+  useEffect(() => {
+    const handleCheckOnResume = async () => {
+      if (document.visibilityState !== 'visible') return;
+      const now = Date.now();
+      // Debounce: minimum 6 seconds between background checks
+      if (now - lastAutoScanTimeRef.current < 6000) return;
+      lastAutoScanTimeRef.current = now;
+
+      try {
+        const newTracks = await checkForNewDownloads(tracksRef.current);
+        if (newTracks.length > 0) {
+          setTracks((prev) => {
+            const unique = newTracks.filter(
+              (nt) => !prev.some((et) => et.title === nt.title && et.artist === nt.artist)
+            );
+            return unique.length > 0 ? [...unique, ...prev] : prev;
+          });
+          const songName = newTracks[0].title || 'track';
+          const msg =
+            newTracks.length === 1
+              ? `⚡ Auto-detected new download: "${songName}" added to library!`
+              : `⚡ Auto-detected ${newTracks.length} new downloads added to library!`;
+          setAutoSyncToast(msg);
+          setTimeout(() => setAutoSyncToast(null), 5000);
+        }
+      } catch (err) {
+        console.debug('Resume auto-scan check:', err);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleCheckOnResume);
+    window.addEventListener('focus', handleCheckOnResume);
+
+    // Periodic background check every 25 seconds while app is in foreground
+    const interval = setInterval(handleCheckOnResume, 25000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleCheckOnResume);
+      window.removeEventListener('focus', handleCheckOnResume);
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Chromium PWA LaunchQueue for "Open with Music Player" / downloaded file taps in Android Chrome
+  useEffect(() => {
+    if ('launchQueue' in window && (window as any).LaunchParams && 'files' in (window as any).LaunchParams.prototype) {
+      try {
+        (window as any).launchQueue.setConsumer(async (launchParams: any) => {
+          if (launchParams.files && launchParams.files.length > 0) {
+            const filePromises = launchParams.files.map((handle: any) => handle.getFile());
+            const files: File[] = await Promise.all(filePromises);
+            const audioFiles = files.filter(
+              (f) => f.type.startsWith('audio/') || /\.(mp3|wav|ogg|flac|m4a|aac|opus|wma)$/i.test(f.name)
+            );
+            if (audioFiles.length > 0) {
+              const newTracks = await scanAudioFiles(audioFiles);
+              if (newTracks.length > 0) {
+                setTracks((prev) => {
+                  const unique = newTracks.filter(
+                    (nt) => !prev.some((et) => et.title === nt.title && et.artist === nt.artist)
+                  );
+                  return unique.length > 0 ? [...unique, ...prev] : prev;
+                });
+                setAutoSyncToast(`Auto-opened ${newTracks.length} audio file(s)`);
+                setTimeout(() => setAutoSyncToast(null), 4000);
+                if (newTracks.length === 1) {
+                  loadAndPlayTrack(newTracks[0], true);
+                }
+              }
+            }
+          }
+        });
+      } catch (err) {
+        console.debug('LaunchQueue consumer setup error:', err);
+      }
+    }
+  }, []);
+
+  // --- Audio Engine Event Bindings (Unified Native & Web) ---
   useEffect(() => {
     audioEngine.init();
     audioEngine.applyEqualizer(eqSettings);
     audioEngine.setVolume(isMuted ? 0 : volume);
     audioEngine.setPlaybackRate(playbackRate);
 
-    const el = audioEngine.getAudioElement();
-    if (!el) return;
-
-    const handleTimeUpdate = () => {
-      setCurrentTime(el.currentTime);
-      if (el.duration && !isNaN(el.duration)) {
-        setDuration(el.duration);
+    const unsubTime = audioEngine.onTimeUpdate((cur, dur) => {
+      setCurrentTime(cur);
+      if (dur && !isNaN(dur) && dur > 0) {
+        setDuration(dur);
       }
-    };
+    });
 
-    const handleLoadedMetadata = () => {
-      if (el.duration && !isNaN(el.duration)) {
-        setDuration(el.duration);
-      }
-    };
+    const unsubState = audioEngine.onStateChange((playing) => {
+      setIsPlaying(playing);
+    });
 
-    const handleEnded = () => {
+    const unsubEnded = audioEngine.onTrackEnd(() => {
       handleTrackEnd();
-    };
-
-    const handlePlay = () => setIsPlaying(true);
-    const handlePause = () => setIsPlaying(false);
-
-    el.addEventListener('timeupdate', handleTimeUpdate);
-    el.addEventListener('loadedmetadata', handleLoadedMetadata);
-    el.addEventListener('ended', handleEnded);
-    el.addEventListener('play', handlePlay);
-    el.addEventListener('pause', handlePause);
+    });
 
     return () => {
-      el.removeEventListener('timeupdate', handleTimeUpdate);
-      el.removeEventListener('loadedmetadata', handleLoadedMetadata);
-      el.removeEventListener('ended', handleEnded);
-      el.removeEventListener('play', handlePlay);
-      el.removeEventListener('pause', handlePause);
+      unsubTime();
+      unsubState();
+      unsubEnded();
     };
   }, []);
 
@@ -518,12 +592,12 @@ export default function App() {
       const cachedBlob = await getAudioBlobOffline(track.id);
       if (cachedBlob) {
         const localBlobUrl = URL.createObjectURL(cachedBlob);
-        audioEngine.loadTrack(localBlobUrl);
+        await audioEngine.loadTrack(localBlobUrl, track);
       } else {
-        audioEngine.loadTrack(track.url);
+        await audioEngine.loadTrack(track.url, track);
       }
     } catch {
-      audioEngine.loadTrack(track.url);
+      await audioEngine.loadTrack(track.url, track);
     }
 
     if (autoPlay) {
@@ -1509,6 +1583,11 @@ export default function App() {
             isCloudConnected={isCloudConnected}
           />
         </>
+      )}
+
+      {/* Opening Welcome Screen showing Logo and "Welcome" text */}
+      {showWelcome && (
+        <WelcomeSplashScreen onDismiss={() => setShowWelcome(false)} />
       )}
     </div>
   );

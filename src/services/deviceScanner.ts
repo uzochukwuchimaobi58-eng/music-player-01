@@ -41,6 +41,143 @@ export async function getSavedDirectoryHandle(): Promise<any | null> {
 }
 
 /**
+ * Check if a directory has already been linked for automatic download detection
+ */
+export async function getSavedDirectoryName(): Promise<string | null> {
+  try {
+    const handle = await getSavedDirectoryHandle();
+    return handle ? (handle.name || 'Downloads') : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Remove saved directory handle
+ */
+export async function clearSavedDirectoryHandle(): Promise<void> {
+  try {
+    await set(DIRECTORY_HANDLE_KEY, null);
+  } catch (err) {
+    console.debug('Failed to clear directory handle:', err);
+  }
+}
+
+/**
+ * Check for newly downloaded audio files inside the connected Download folder.
+ * Returns only tracks that are NOT already in the library.
+ */
+export async function checkForNewDownloads(
+  existingTracks: Track[],
+  onProgress?: ScanProgressCallback
+): Promise<Track[]> {
+  try {
+    const handle = await getSavedDirectoryHandle();
+    if (!handle) return [];
+
+    // Verify read permission
+    if (handle.queryPermission) {
+      const perm = await handle.queryPermission({ mode: 'read' });
+      if (perm !== 'granted') {
+        return [];
+      }
+    }
+
+    const audioFiles: { file: File; relativePath: string; folder: string }[] = [];
+
+    async function readDirectory(dirHandle: any, path: string = '') {
+      for await (const entry of dirHandle.values()) {
+        if (entry.kind === 'file') {
+          if (AUDIO_EXTENSIONS.test(entry.name)) {
+            const file = await entry.getFile();
+            audioFiles.push({
+              file,
+              relativePath: path ? `${path}/${entry.name}` : entry.name,
+              folder: path || dirHandle.name || 'Downloads',
+            });
+          }
+        } else if (entry.kind === 'directory') {
+          if (!entry.name.startsWith('.')) {
+            await readDirectory(entry, path ? `${path}/${entry.name}` : entry.name);
+          }
+        }
+      }
+    }
+
+    await readDirectory(handle);
+    if (audioFiles.length === 0) return [];
+
+    // Filter out files that are already in the existing tracks library
+    const existingTitlesOrNames = new Set(
+      existingTracks.map((t) => (t.title || '').trim().toLowerCase())
+    );
+
+    const newlyAddedFiles = audioFiles.filter((af) => {
+      const fileNameWithoutExt = af.file.name.replace(/\.[^/.]+$/, '').trim().toLowerCase();
+      return !existingTitlesOrNames.has(fileNameWithoutExt);
+    });
+
+    if (newlyAddedFiles.length === 0) return [];
+
+    const newTracks: Track[] = [];
+    for (let i = 0; i < newlyAddedFiles.length; i++) {
+      const { file, folder } = newlyAddedFiles[i];
+      if (onProgress) {
+        onProgress(i + 1, newlyAddedFiles.length, file.name);
+      }
+      const track = await processAudioFile(file, folder, i);
+      newTracks.push(track);
+    }
+
+    return newTracks;
+  } catch (err) {
+    console.debug('Check for new downloads error:', err);
+    return [];
+  }
+}
+
+/**
+ * Connect the user's phone /Download or /Music folder once for continuous auto-detection
+ */
+export async function linkDownloadDirectory(
+  onProgress?: ScanProgressCallback
+): Promise<{ success: boolean; folderName: string; tracks: Track[]; error?: string }> {
+  if (!isFileSystemAccessSupported()) {
+    return {
+      success: false,
+      folderName: '',
+      tracks: [],
+      error: 'Directory access is not supported in this browser. Please use the manual file selector.',
+    };
+  }
+
+  try {
+    const dirHandle = await (window as any).showDirectoryPicker({
+      id: 'phone-downloads-storage',
+      mode: 'read',
+      startIn: 'downloads',
+    });
+
+    await saveDirectoryHandle(dirHandle);
+    const folderName = dirHandle.name || 'Downloads';
+
+    // Scan initial files in folder
+    const tracks = await autoScanStoredDirectory(onProgress);
+
+    return {
+      success: true,
+      folderName,
+      tracks,
+    };
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      return { success: false, folderName: '', tracks: [] };
+    }
+    return { success: false, folderName: '', tracks: [], error: err.message || 'Failed to select folder' };
+  }
+}
+
+/**
  * Automatically scan stored directory handle on startup without any user clicks
  */
 export async function autoScanStoredDirectory(

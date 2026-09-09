@@ -6,6 +6,7 @@ export interface Song {
   duration: number; // in milliseconds
   uri: string;
   albumId: string;
+  artwork?: string | null;
 }
 
 export interface ScanResult {
@@ -124,6 +125,31 @@ export interface PlayerSettings {
   allowOthersPlaying: boolean;
   playPauseFade: boolean;
   gaplessPlayback: boolean;
+
+  // Others Section (Matching example image)
+  useEnglishLanguage?: boolean;
+  hideUpdateReminder?: boolean;
+}
+
+export interface UserFeedback {
+  id: string;
+  category: 'feature_request' | 'audio_quality' | 'ui_design' | 'performance' | 'general';
+  rating?: number;
+  message: string;
+  userEmail?: string;
+  appVersion?: string;
+  createdAt: string;
+}
+
+export interface ProblemReport {
+  id: string;
+  category: 'playback_stopped' | 'scan_issue' | 'distortion' | 'crash_freeze' | 'ui_glitch' | 'other';
+  title?: string;
+  description: string;
+  stepsToReproduce?: string;
+  userEmail?: string;
+  appVersion?: string;
+  createdAt: string;
 }
 
 export interface PlayerState {

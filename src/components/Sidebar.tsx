@@ -110,10 +110,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           style={{ borderColor: theme.headerBorder }}
         >
           <div
-            className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-lg"
-            style={{ backgroundColor: `${theme.accentColor}25`, border: `1px solid ${theme.accentColor}40` }}
+            className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-lg overflow-hidden shrink-0 ring-1 ring-white/10"
           >
-            <Music2 className="w-6 h-6" style={{ color: theme.accentColor }} />
+            <img src="/logo.png" alt="Sonance Logo" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
           </div>
           <div>
             <h2 className="text-base font-bold tracking-tight text-white flex items-center gap-1.5">

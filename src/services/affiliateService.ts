@@ -57,16 +57,14 @@ export function subscribeToCloudAffiliateProducts(
         onUpdate(cloudProducts, true);
       },
       (error) => {
-        console.warn('[AffiliateFeed] Real-time cloud sync warning:', error.message);
-        // Fallback to locally cached products
+        // Safe offline fallback: provide cached products without warning spam
         const local = loadLocalProducts();
         onUpdate(local, false);
       }
     );
 
     return unsubscribe;
-  } catch (err) {
-    console.warn('[AffiliateFeed] Failed to subscribe to cloud:', err);
+  } catch {
     const local = loadLocalProducts();
     onUpdate(local, false);
     return () => {};
@@ -88,9 +86,8 @@ export async function seedDefaultProductsToCloud(): Promise<void> {
       });
     });
     await batch.commit();
-    console.log('[AffiliateFeed] Successfully seeded initial cloud products.');
-  } catch (err) {
-    console.warn('[AffiliateFeed] Cloud seed could not complete:', err);
+  } catch {
+    // Silently fall back if offline or non-owner
   }
 }
 

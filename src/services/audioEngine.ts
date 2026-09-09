@@ -1,5 +1,7 @@
-import { EqualizerSettings } from '../types';
+import { Capacitor } from '@capacitor/core';
+import { EqualizerSettings, Track } from '../types';
 import { EQ_FREQUENCIES } from '../data/defaultTracks';
+import { MusicLibrary } from '../plugins/MusicLibrary';
 
 export type TrendingAudioEffect = 'normal' | 'sped_up' | 'slowed_reverb' | 'nightcore' | 'bass_drop' | 'lofi_tape';
 
@@ -22,6 +24,15 @@ class AudioEngineService {
   private activeEffect: TrendingAudioEffect = 'normal';
   private isKaraokeMode: boolean = false;
   private isInitialized = false;
+
+  // Native Playback Management
+  private isNative: boolean = false;
+  private nativeListenersSetup: boolean = false;
+  private timeUpdateListeners: Set<(currentTime: number, duration: number) => void> = new Set();
+  private stateChangeListeners: Set<(isPlaying: boolean) => void> = new Set();
+  private trackEndListeners: Set<() => void> = new Set();
+  private lastCurrentTime: number = 0;
+  private lastDuration: number = 0;
 
   // Safe parameter ramping to completely eliminate audio clicks/crackles
   private rampParam(param: AudioParam | null | undefined, target: number, duration: number = 0.04) {
@@ -50,6 +61,43 @@ class AudioEngineService {
       this.audioElement = new Audio();
       this.audioElement.preload = 'auto';
 
+      // HTML5 Audio Event Listeners for Web fallback
+      this.audioElement.addEventListener('timeupdate', () => {
+        if (!this.isNative && this.audioElement) {
+          const cur = this.audioElement.currentTime;
+          const dur = this.audioElement.duration || 0;
+          this.lastCurrentTime = cur;
+          if (dur > 0 && !isNaN(dur)) this.lastDuration = dur;
+          this.timeUpdateListeners.forEach((cb) => cb(cur, dur));
+        }
+      });
+
+      this.audioElement.addEventListener('loadedmetadata', () => {
+        if (!this.isNative && this.audioElement) {
+          const dur = this.audioElement.duration || 0;
+          if (dur > 0 && !isNaN(dur)) this.lastDuration = dur;
+          this.timeUpdateListeners.forEach((cb) => cb(this.audioElement?.currentTime || 0, dur));
+        }
+      });
+
+      this.audioElement.addEventListener('play', () => {
+        if (!this.isNative) {
+          this.stateChangeListeners.forEach((cb) => cb(true));
+        }
+      });
+
+      this.audioElement.addEventListener('pause', () => {
+        if (!this.isNative) {
+          this.stateChangeListeners.forEach((cb) => cb(false));
+        }
+      });
+
+      this.audioElement.addEventListener('ended', () => {
+        if (!this.isNative) {
+          this.trackEndListeners.forEach((cb) => cb());
+        }
+      });
+
       // Create Analyser
       this.analyser = this.audioCtx.createAnalyser();
       this.analyser.fftSize = 256;
@@ -59,17 +107,44 @@ class AudioEngineService {
       this.preampGain = this.audioCtx.createGain();
       this.preampGain.gain.setValueAtTime(0.82, this.audioCtx.currentTime);
 
-      // Create Master Gain and Dry/Reverb gains
+      // Create 10-Band EQ filters
+      EQ_FREQUENCIES.forEach((freq) => {
+        if (!this.audioCtx) return;
+        const filter = this.audioCtx.createBiquadFilter();
+        if (freq <= 60) {
+          filter.type = 'lowshelf';
+        } else if (freq >= 16000) {
+          filter.type = 'highshelf';
+        } else {
+          filter.type = 'peaking';
+          filter.Q.value = 1.414;
+        }
+        filter.frequency.value = freq;
+        filter.gain.value = 0;
+        this.eqFilters[freq] = filter;
+      });
+
+      // Dedicated Bass Booster (Peaking at 65Hz)
+      this.bassFilter = this.audioCtx.createBiquadFilter();
+      this.bassFilter.type = 'lowshelf';
+      this.bassFilter.frequency.value = 80;
+      this.bassFilter.gain.value = 0;
+
+      // Dedicated Treble Booster (Highshelf at 12kHz)
+      this.trebleFilter = this.audioCtx.createBiquadFilter();
+      this.trebleFilter.type = 'highshelf';
+      this.trebleFilter.frequency.value = 12000;
+      this.trebleFilter.gain.value = 0;
+
+      // Reverb / Spatial Node
+      this.reverbGain = this.audioCtx.createGain();
+      this.dryGain = this.audioCtx.createGain();
       this.masterGain = this.audioCtx.createGain();
       this.masterGain.gain.setValueAtTime(1.0, this.audioCtx.currentTime);
-
-      this.dryGain = this.audioCtx.createGain();
       this.dryGain.gain.setValueAtTime(1.0, this.audioCtx.currentTime);
-
-      this.reverbGain = this.audioCtx.createGain();
       this.reverbGain.gain.setValueAtTime(0.0, this.audioCtx.currentTime);
 
-      // Transparent peak safety limiter: Gentle soft-knee limiting without squashing bass into square waves
+      // Studio Output Limiter / Compressor to eliminate distortion
       this.compressor = this.audioCtx.createDynamicsCompressor();
       this.compressor.threshold.setValueAtTime(-1.0, this.audioCtx.currentTime);
       this.compressor.knee.setValueAtTime(18, this.audioCtx.currentTime);
@@ -77,47 +152,13 @@ class AudioEngineService {
       this.compressor.attack.setValueAtTime(0.005, this.audioCtx.currentTime);
       this.compressor.release.setValueAtTime(0.20, this.audioCtx.currentTime);
 
-      // Dedicated Bass and Treble shelving filters
-      this.bassFilter = this.audioCtx.createBiquadFilter();
-      this.bassFilter.type = 'lowshelf';
-      this.bassFilter.frequency.value = 100;
-      this.bassFilter.gain.value = 0;
-
-      this.trebleFilter = this.audioCtx.createBiquadFilter();
-      this.trebleFilter.type = 'highshelf';
-      this.trebleFilter.frequency.value = 8000;
-      this.trebleFilter.gain.value = 0;
-
-      // Create Equalizer Bands
-      EQ_FREQUENCIES.forEach((freq, idx) => {
-        if (!this.audioCtx) return;
-        const filter = this.audioCtx.createBiquadFilter();
-        if (idx === 0) {
-          filter.type = 'lowshelf';
-        } else if (idx === EQ_FREQUENCIES.length - 1) {
-          filter.type = 'highshelf';
-        } else {
-          filter.type = 'peaking';
-          filter.Q.value = 1.2;
-        }
-        filter.frequency.value = freq;
-        filter.gain.value = 0;
-        this.eqFilters[freq] = filter;
-      });
-
-      // Connect Web Audio Graph
+      // Wire signal graph safely:
       try {
         this.sourceNode = this.audioCtx.createMediaElementSource(this.audioElement);
-        
-        // Route: Source -> Preamp -> BassShelf -> TrebleShelf -> EQ Bands -> DryGain -> Compressor -> MasterGain -> Analyser -> Destination
-        this.sourceNode.connect(this.preampGain);
-        let prevNode: AudioNode = this.preampGain;
+        let prevNode: AudioNode = this.sourceNode;
 
-        prevNode.connect(this.bassFilter);
-        prevNode = this.bassFilter;
-
-        prevNode.connect(this.trebleFilter);
-        prevNode = this.trebleFilter;
+        prevNode.connect(this.preampGain);
+        prevNode = this.preampGain;
 
         EQ_FREQUENCIES.forEach((freq) => {
           const filter = this.eqFilters[freq];
@@ -126,6 +167,16 @@ class AudioEngineService {
             prevNode = filter;
           }
         });
+
+        if (this.bassFilter) {
+          prevNode.connect(this.bassFilter);
+          prevNode = this.bassFilter;
+        }
+
+        if (this.trebleFilter) {
+          prevNode.connect(this.trebleFilter);
+          prevNode = this.trebleFilter;
+        }
 
         // Parallel routing: Dry output to compressor
         prevNode.connect(this.dryGain);
@@ -141,6 +192,48 @@ class AudioEngineService {
       this.isInitialized = true;
     } catch (err) {
       console.error('Failed to initialize Web Audio Engine', err);
+    }
+  }
+
+  private async setupNativeListeners() {
+    if (this.nativeListenersSetup) return;
+    this.nativeListenersSetup = true;
+
+    try {
+      await MusicLibrary.addListener('playbackProgress', (progress) => {
+        if (this.isNative) {
+          const curSec = (progress.currentPosition || 0) / 1000;
+          const durSec = (progress.duration || 0) / 1000;
+          this.lastCurrentTime = curSec;
+          if (durSec > 0) this.lastDuration = durSec;
+          this.timeUpdateListeners.forEach((cb) => cb(curSec, durSec));
+        }
+      });
+
+      await MusicLibrary.addListener('playbackStateChange', (state) => {
+        if (this.isNative) {
+          const isPlaying = state.status === 'playing';
+          if (state.duration && state.duration > 0) {
+            this.lastDuration = state.duration / 1000;
+          }
+          if (state.position !== undefined) {
+            this.lastCurrentTime = state.position / 1000;
+          }
+          this.stateChangeListeners.forEach((cb) => cb(isPlaying));
+        }
+      });
+
+      await MusicLibrary.addListener('playbackCompleted', () => {
+        if (this.isNative) {
+          this.trackEndListeners.forEach((cb) => cb());
+        }
+      });
+
+      await MusicLibrary.addListener('playbackError', (err) => {
+        console.warn('Native playback error:', err);
+      });
+    } catch (e) {
+      console.debug('Native listeners not supported or failed to bind:', e);
     }
   }
 
@@ -166,25 +259,67 @@ class AudioEngineService {
     return this.analyser;
   }
 
-  public loadTrack(url: string) {
+  public async loadTrack(url: string, track?: Track) {
     this.init();
+    this.setupNativeListeners();
+
+    const isContentUri = url.startsWith('content://');
+    const isNativeEnv = Capacitor.isNativePlatform();
+
+    // 1. If this is an Android content URI or running on native Android with a local track,
+    // use the native MediaPlayer PlaybackManager!
+    if (isContentUri || (isNativeEnv && track?.sourceType === 'user-upload')) {
+      this.isNative = true;
+      if (this.audioElement) {
+        try {
+          this.audioElement.pause();
+          this.audioElement.src = '';
+        } catch {}
+      }
+
+      // Extract raw ID if id is formatted as native-12345-...
+      let rawId: string | undefined = undefined;
+      if (track?.id) {
+        const parts = track.id.split('-');
+        if (parts.length >= 2 && parts[0] === 'native') {
+          rawId = parts[1];
+        } else {
+          rawId = track.id;
+        }
+      }
+
+      try {
+        await MusicLibrary.playTrack({
+          uri: url,
+          id: rawId,
+          title: track?.title,
+          artist: track?.artist,
+        });
+      } catch (err) {
+        console.warn('Native MusicLibrary.playTrack error:', err);
+      }
+      return;
+    }
+
+    // 2. Standard Web Browser / AudioElement playback
+    this.isNative = false;
+    try {
+      if (Capacitor.isNativePlatform()) {
+        MusicLibrary.pause();
+      }
+    } catch {}
+
     if (this.audioElement) {
-      // Clean up previous playback smoothly
       try {
         this.audioElement.pause();
-      } catch {
-        // ignore
-      }
+      } catch {}
 
       if (url.startsWith('blob:') || url.startsWith('data:')) {
         this.audioElement.removeAttribute('crossOrigin');
       } else {
-        // Only set crossOrigin if URL looks like it's remote CDN
         try {
           this.audioElement.crossOrigin = 'anonymous';
-        } catch {
-          // ignore
-        }
+        } catch {}
       }
 
       this.audioElement.src = url;
@@ -195,12 +330,21 @@ class AudioEngineService {
 
   public async play(fade: boolean = false): Promise<void> {
     this.init();
+    if (this.isNative) {
+      try {
+        await MusicLibrary.resume();
+        this.stateChangeListeners.forEach((cb) => cb(true));
+      } catch (e) {
+        console.warn('Native resume error:', e);
+      }
+      return;
+    }
+
     await this.resumeContext();
 
     if (this.audioElement && this.audioElement.src) {
       try {
         if (fade && this.masterGain && this.audioCtx) {
-          const now = this.audioCtx.currentTime;
           const currentGain = this.masterGain.gain.value || 0.85;
           this.rampParam(this.masterGain.gain, 0.001, 0.01);
           setTimeout(() => {
@@ -210,7 +354,6 @@ class AudioEngineService {
         await this.audioElement.play();
       } catch (err: any) {
         if (err?.name === 'AbortError') {
-          // Normal when switching tracks quickly, ignore safely
           return;
         }
         console.warn('Audio element play error:', err);
@@ -219,6 +362,16 @@ class AudioEngineService {
   }
 
   public pause(fade: boolean = false) {
+    if (this.isNative) {
+      try {
+        MusicLibrary.pause();
+        this.stateChangeListeners.forEach((cb) => cb(false));
+      } catch (e) {
+        console.warn('Native pause error:', e);
+      }
+      return;
+    }
+
     if (!this.audioElement) return;
 
     if (fade && this.masterGain && this.audioCtx) {
@@ -238,6 +391,17 @@ class AudioEngineService {
   }
 
   public seek(seconds: number) {
+    if (this.isNative) {
+      try {
+        MusicLibrary.seekTo({ position: Math.round(seconds * 1000) });
+        this.lastCurrentTime = seconds;
+        this.timeUpdateListeners.forEach((cb) => cb(seconds, this.lastDuration));
+      } catch (e) {
+        console.warn('Native seek error:', e);
+      }
+      return;
+    }
+
     if (this.audioElement && Number.isFinite(seconds)) {
       this.audioElement.currentTime = seconds;
     }
@@ -245,8 +409,12 @@ class AudioEngineService {
 
   public setVolume(volume: number) {
     const clamped = Math.max(0, Math.min(1, volume));
+    if (this.isNative) {
+      try {
+        MusicLibrary.setVolume({ volume: clamped });
+      } catch {}
+    }
     if (this.audioElement) {
-      // Keep source element volume clean and constant to prevent double-attenuation artifacts
       this.audioElement.volume = 1.0;
     }
     if (this.masterGain) {
@@ -446,7 +614,34 @@ class AudioEngineService {
       this.analyser.getByteTimeDomainData(array);
     }
   }
+
+  // --- Universal Event Subscriptions ---
+  public onTimeUpdate(cb: (currentTime: number, duration: number) => void): () => void {
+    this.timeUpdateListeners.add(cb);
+    return () => this.timeUpdateListeners.delete(cb);
+  }
+
+  public onStateChange(cb: (isPlaying: boolean) => void): () => void {
+    this.stateChangeListeners.add(cb);
+    return () => this.stateChangeListeners.delete(cb);
+  }
+
+  public onTrackEnd(cb: () => void): () => void {
+    this.trackEndListeners.add(cb);
+    return () => this.trackEndListeners.delete(cb);
+  }
+
+  public isNativePlayback(): boolean {
+    return this.isNative;
+  }
+
+  public getCurrentTime(): number {
+    return this.isNative ? this.lastCurrentTime : (this.audioElement?.currentTime || 0);
+  }
+
+  public getDuration(): number {
+    return this.isNative ? this.lastDuration : (this.audioElement?.duration || 0);
+  }
 }
 
 export const audioEngine = new AudioEngineService();
-

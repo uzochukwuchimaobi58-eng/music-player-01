@@ -78,7 +78,7 @@ export const ScanLibraryModal: React.FC<ScanLibraryModalProps> = ({
         setDiscoveredSongs(result.songs);
         setNoMusicFound(false);
 
-        // Convert Native Song[] to Track[] for library state
+        // Convert Native Song[] to Track[] for library state, preserving extracted artwork
         const convertedTracks: Track[] = result.songs.map((s, idx) => ({
           id: `native-${s.id || idx}-${Date.now()}`,
           title: s.title,
@@ -86,7 +86,7 @@ export const ScanLibraryModal: React.FC<ScanLibraryModalProps> = ({
           album: s.album,
           duration: Math.max(1, Math.round((s.duration || 0) / 1000)),
           url: s.uri,
-          coverArt: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&q=80',
+          coverArt: s.artwork || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&q=80',
           folder: s.album || 'Phone Music',
           isFavorite: false,
           playCount: 0,

@@ -87,6 +87,82 @@
         }
       },
       "required": ["id"]
+    },
+    "UserFeedback": {
+      "title": "UserFeedback",
+      "description": "User feedback, suggestions, and rating submitted through Settings.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique feedback ID."
+        },
+        "category": {
+          "type": "string",
+          "description": "Category of the feedback."
+        },
+        "rating": {
+          "type": "number",
+          "description": "Star rating out of 5."
+        },
+        "message": {
+          "type": "string",
+          "description": "User message and feedback details."
+        },
+        "userEmail": {
+          "type": "string",
+          "description": "Optional user contact email."
+        },
+        "appVersion": {
+          "type": "string",
+          "description": "App version at time of submission."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of creation."
+        }
+      },
+      "required": ["id", "category", "message", "createdAt"]
+    },
+    "ProblemReport": {
+      "title": "ProblemReport",
+      "description": "Bug report and technical issue submitted by user with device diagnostics.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique report ID."
+        },
+        "category": {
+          "type": "string",
+          "description": "Problem category."
+        },
+        "title": {
+          "type": "string",
+          "description": "Short summary of the problem."
+        },
+        "description": {
+          "type": "string",
+          "description": "Detailed description of the issue."
+        },
+        "stepsToReproduce": {
+          "type": "string",
+          "description": "Optional steps to reproduce the bug."
+        },
+        "userEmail": {
+          "type": "string",
+          "description": "Optional contact email."
+        },
+        "appVersion": {
+          "type": "string",
+          "description": "Current app version."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of submission."
+        }
+      },
+      "required": ["id", "category", "description", "createdAt"]
     }
   },
   "firestore": {
@@ -97,6 +173,14 @@
     "/affiliate_config/{configId}": {
       "schema": "AffiliateConfig",
       "description": "Global settings such as affiliate partner tag."
+    },
+    "/feedbacks/{feedbackId}": {
+      "schema": "UserFeedback",
+      "description": "User ratings and feedback submitted from Settings."
+    },
+    "/problem_reports/{reportId}": {
+      "schema": "ProblemReport",
+      "description": "Technical issue and bug reports submitted from Settings."
     }
   }
 }

@@ -35,6 +35,29 @@ service cloud.firestore {
         && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 100));
     }
 
+    // Validate user feedback schema
+    function isValidFeedbackData(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 100
+        && data.category is string && data.category.size() > 0 && data.category.size() <= 50
+        && data.message is string && data.message.size() > 0 && data.message.size() <= 2500
+        && data.createdAt is string && data.createdAt.size() <= 100
+        && (!('rating' in data) || (data.rating is number && data.rating >= 1 && data.rating <= 5))
+        && (!('userEmail' in data) || (data.userEmail is string && data.userEmail.size() <= 150))
+        && (!('appVersion' in data) || (data.appVersion is string && data.appVersion.size() <= 50));
+    }
+
+    // Validate problem report schema
+    function isValidProblemReportData(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 100
+        && data.category is string && data.category.size() > 0 && data.category.size() <= 50
+        && data.description is string && data.description.size() > 0 && data.description.size() <= 3500
+        && data.createdAt is string && data.createdAt.size() <= 100
+        && (!('title' in data) || (data.title is string && data.title.size() <= 250))
+        && (!('stepsToReproduce' in data) || (data.stepsToReproduce is string && data.stepsToReproduce.size() <= 1500))
+        && (!('userEmail' in data) || (data.userEmail is string && data.userEmail.size() <= 150))
+        && (!('appVersion' in data) || (data.appVersion is string && data.appVersion.size() <= 50));
+    }
+
     // Public affiliate products feed
     match /affiliate_products/{productId} {
       // Any app user can safely read the gear feed
@@ -57,6 +80,26 @@ service cloud.firestore {
 
       // Deletion of global configuration is strictly blocked
       allow delete: if false;
+    }
+
+    // User Feedback collection
+    match /feedbacks/{feedbackId} {
+      // App users can submit feedback with validated payloads
+      allow create: if isValidFeedbackData(request.resource.data);
+
+      // Only verified app owner/admin can read or manage user feedback submissions
+      allow read, delete: if isOwner();
+      allow update: if false;
+    }
+
+    // Problem Reports collection
+    match /problem_reports/{reportId} {
+      // App users can report bugs or technical issues with validated schema
+      allow create: if isValidProblemReportData(request.resource.data);
+
+      // Only verified app owner/admin can read or manage problem reports
+      allow read, delete: if isOwner();
+      allow update: if false;
     }
 
     // Deny all other collections by default (blocks arbitrary writes or reads)

@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
-  Camera,
   Check,
   Smartphone,
   BatteryCharging,
@@ -19,8 +18,14 @@ import {
   ShieldAlert,
   HelpCircle,
   X,
-  Radio
+  Radio,
+  MessageSquareHeart,
+  Bug
 } from 'lucide-react';
+import { FaqModal } from './FaqModal';
+import { FeedbackModal } from './FeedbackModal';
+import { ReportProblemModal } from './ReportProblemModal';
+import { getSavedDirectoryName, linkDownloadDirectory } from '../services/deviceScanner';
 import {
   PlayerSettings,
   AccentColor,
@@ -90,8 +95,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     | 'status_lyrics'
   >(null);
 
+  // Dedicated Modals for "Others" section
+  const [isFaqOpen, setIsFaqOpen] = useState(false);
+  const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
+  const [isReportProblemOpen, setIsReportProblemOpen] = useState(false);
+
   const [testBatterySuccess, setTestBatterySuccess] = useState(false);
   const [duplicateScanDone, setDuplicateScanDone] = useState(false);
+  const [connectedFolder, setConnectedFolder] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    getSavedDirectoryName().then((name) => {
+      if (name) setConnectedFolder(name);
+    });
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -165,21 +182,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <ChevronLeft className="w-6 h-6 stroke-[2.5]" />
           </button>
           <h1 className="text-lg font-bold tracking-tight">Settings</h1>
-        </div>
-
-        {/* Right Camera / AD Button */}
-        <div className="relative flex items-center">
-          <button
-            onClick={() => setActiveSubDialog('music_stops')}
-            className="p-2 rounded-xl hover:bg-white/10 text-zinc-300 hover:text-white transition-colors cursor-pointer relative"
-          >
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-rose-500 to-amber-400 flex items-center justify-center text-white shadow-xs">
-              <Camera className="w-4 h-4" />
-            </div>
-            <span className="absolute -top-1 -right-1 text-[8px] font-black bg-zinc-800 text-zinc-200 px-1 py-0.2 rounded border border-zinc-700 leading-none">
-              AD
-            </span>
-          </button>
         </div>
       </div>
 
@@ -446,6 +448,45 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <ChevronRight className="w-5 h-5 text-zinc-500 shrink-0" />
             </div>
           </div>
+
+          {/* 14. Auto-detect online downloads */}
+          <div
+            id="setting-row-autodetect-downloads"
+            onClick={async () => {
+              try {
+                const res = await linkDownloadDirectory();
+                if (res.success && res.folderName) {
+                  setConnectedFolder(res.folderName);
+                }
+              } catch (e) {
+                console.debug('Link folder error:', e);
+              }
+            }}
+            className={`px-4 py-3.5 flex items-center justify-between cursor-pointer transition-colors ${
+              settings.nightMode ? 'hover:bg-zinc-800/40' : 'hover:bg-zinc-200/60'
+            }`}
+          >
+            <div className="pr-4">
+              <p className="text-sm font-normal">Auto-detect online downloads</p>
+              <p className="text-xs text-zinc-500 mt-0.5">
+                {connectedFolder
+                  ? `Watching /${connectedFolder} (Auto-syncs on return)`
+                  : 'Link /Download folder to automatically import new songs'}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  connectedFolder
+                    ? 'bg-emerald-500/20 text-emerald-400'
+                    : 'bg-amber-500/20 text-amber-400'
+                }`}
+              >
+                {connectedFolder ? 'Active' : 'Connect'}
+              </span>
+              <ChevronRight className="w-5 h-5 text-zinc-500 shrink-0" />
+            </div>
+          </div>
         </div>
 
         {/* ========================================================================= */}
@@ -602,9 +643,61 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* ========================================================================= */}
-        {/* STORAGE & DATA MANAGEMENT */}
+        {/* OTHERS SECTION (Single buttons for FAQ, Feedback, Report a problem) */}
         {/* ========================================================================= */}
-        <div className="py-4 px-4 space-y-3">
+        <div id="settings-section-others" className="pt-2 border-t border-zinc-800/60">
+          <div className="px-4 py-3">
+            <h2
+              className="text-xs font-bold uppercase tracking-wider text-[#d97706] sm:text-sm"
+              style={{ color: currentAccent.hex }}
+            >
+              Others
+            </h2>
+          </div>
+
+          <div className="divide-y divide-zinc-800/30">
+            {/* 1. FAQ */}
+            <div
+              id="setting-row-faq"
+              onClick={() => setIsFaqOpen(true)}
+              className={`px-4 py-3.5 flex items-center justify-between cursor-pointer transition-colors ${
+                settings.nightMode ? 'hover:bg-zinc-800/40' : 'hover:bg-zinc-200/60'
+              }`}
+            >
+              <p className="text-sm font-normal text-zinc-100">FAQ</p>
+              <ChevronRight className="w-4 h-4 text-zinc-500" />
+            </div>
+
+            {/* 2. Feedback */}
+            <div
+              id="setting-row-feedback"
+              onClick={() => setIsFeedbackOpen(true)}
+              className={`px-4 py-3.5 flex items-center justify-between cursor-pointer transition-colors ${
+                settings.nightMode ? 'hover:bg-zinc-800/40' : 'hover:bg-zinc-200/60'
+              }`}
+            >
+              <p className="text-sm font-normal text-zinc-100">Feedback</p>
+              <ChevronRight className="w-4 h-4 text-zinc-500" />
+            </div>
+
+            {/* 3. Report a problem */}
+            <div
+              id="setting-row-report-problem"
+              onClick={() => setIsReportProblemOpen(true)}
+              className={`px-4 py-3.5 flex items-center justify-between cursor-pointer transition-colors ${
+                settings.nightMode ? 'hover:bg-zinc-800/40' : 'hover:bg-zinc-200/60'
+              }`}
+            >
+              <p className="text-sm font-normal text-zinc-100">Report a problem</p>
+              <ChevronRight className="w-4 h-4 text-zinc-500" />
+            </div>
+          </div>
+        </div>
+
+        {/* ========================================================================= */}
+        {/* STORAGE & DATA MANAGEMENT (Positioned cleanly after Report a problem) */}
+        {/* ========================================================================= */}
+        <div id="settings-storage-section" className="py-4 px-4 pb-12 space-y-3">
           <div className="p-3.5 rounded-2xl bg-zinc-900/80 border border-zinc-800 flex items-center justify-between">
             <div>
               <p className="text-xs font-semibold text-white">Indexed Offline Storage</p>
@@ -995,6 +1088,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         </div>
       )}
+
+      {/* 8. 12 FAQs Modal with Answers and Solutions */}
+      <FaqModal
+        isOpen={isFaqOpen}
+        onClose={() => setIsFaqOpen(false)}
+        onOpenFeedback={() => {
+          setIsFaqOpen(false);
+          setIsFeedbackOpen(true);
+        }}
+        accentColorHex={currentAccent.hex}
+        nightMode={settings.nightMode}
+      />
+
+      {/* 9. Feedback Modal (saves to Firestore) */}
+      <FeedbackModal
+        isOpen={isFeedbackOpen}
+        onClose={() => setIsFeedbackOpen(false)}
+        accentColorHex={currentAccent.hex}
+        nightMode={settings.nightMode}
+      />
+
+      {/* 10. Report a Problem Modal (saves to Firestore) */}
+      <ReportProblemModal
+        isOpen={isReportProblemOpen}
+        onClose={() => setIsReportProblemOpen(false)}
+        accentColorHex={currentAccent.hex}
+        nightMode={settings.nightMode}
+      />
     </div>
   );
 };
