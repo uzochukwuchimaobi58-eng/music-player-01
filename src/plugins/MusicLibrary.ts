@@ -19,14 +19,74 @@ export interface PlaybackErrorEvent {
   message: string;
 }
 
+export interface MediaActionEvent {
+  type: 'play' | 'pause' | 'next' | 'previous' | 'seekTo' | 'close' | 'favorite';
+  position?: number;
+}
+
+export interface TrackAutoAdvancedEvent {
+  id: string;
+  index: number;
+  title: string;
+  artist: string;
+}
+
+export interface NativeQueueItem {
+  id: string;
+  uri?: string;
+  title: string;
+  artist: string;
+  album?: string;
+  coverArt?: string;
+  duration?: number;
+  isFavorite?: boolean;
+}
+
 export interface MusicLibraryPlugin {
   scan(): Promise<ScanResult>;
   scanSongs(): Promise<ScanResult>;
-  playTrack(options: { uri?: string; id?: string; title?: string; artist?: string }): Promise<{ status: string; duration?: number; position?: number }>;
+  playTrack(options: {
+    uri?: string;
+    id?: string;
+    title?: string;
+    artist?: string;
+    album?: string;
+    coverArt?: string;
+    duration?: number;
+    isFavorite?: boolean;
+    queue?: NativeQueueItem[];
+    currentIndex?: number;
+    repeatMode?: string;
+    isShuffle?: boolean;
+  }): Promise<{ status: string; duration?: number; position?: number }>;
+  setQueue(options: {
+    queue: NativeQueueItem[];
+    currentIndex?: number;
+    currentId?: string;
+    repeatMode?: string;
+    isShuffle?: boolean;
+  }): Promise<void>;
+  setPlaybackMode(options: {
+    repeatMode?: string;
+    isShuffle?: boolean;
+  }): Promise<void>;
+  playNext(): Promise<{ success: boolean }>;
+  playPrevious(): Promise<{ success: boolean }>;
   pause(): Promise<{ status: string }>;
   resume(): Promise<{ status: string }>;
   seekTo(options: { position: number }): Promise<{ position: number }>;
   setVolume(options: { volume: number }): Promise<void>;
+  updateNotification(options: {
+    title: string;
+    artist: string;
+    album?: string;
+    coverArt?: string;
+    isPlaying: boolean;
+    duration: number;
+    currentTime: number;
+    isFavorite?: boolean;
+  }): Promise<void>;
+  hideNotification(): Promise<void>;
   getPlaybackStatus(): Promise<{ isPlaying: boolean; currentPosition: number; duration: number }>;
   getArtwork?(options: { songId?: string; uri?: string; albumId?: string }): Promise<{ artwork: string | null }>;
   addListener(
@@ -42,8 +102,16 @@ export interface MusicLibraryPlugin {
     listenerFunc: () => void
   ): Promise<PluginListenerHandle>;
   addListener(
+    eventName: 'trackAutoAdvanced',
+    listenerFunc: (event: TrackAutoAdvancedEvent) => void
+  ): Promise<PluginListenerHandle>;
+  addListener(
     eventName: 'playbackError',
     listenerFunc: (err: PlaybackErrorEvent) => void
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'mediaAction',
+    listenerFunc: (action: MediaActionEvent) => void
   ): Promise<PluginListenerHandle>;
 }
 
@@ -64,6 +132,18 @@ export class MusicLibraryWeb extends WebPlugin implements MusicLibraryPlugin {
     return { status: 'web-fallback' };
   }
 
+  async setQueue(_options: { queue: NativeQueueItem[] }): Promise<void> {}
+
+  async setPlaybackMode(_options: { repeatMode?: string; isShuffle?: boolean }): Promise<void> {}
+
+  async playNext(): Promise<{ success: boolean }> {
+    return { success: false };
+  }
+
+  async playPrevious(): Promise<{ success: boolean }> {
+    return { success: false };
+  }
+
   async pause(): Promise<{ status: string }> {
     return { status: 'paused' };
   }
@@ -77,6 +157,19 @@ export class MusicLibraryWeb extends WebPlugin implements MusicLibraryPlugin {
   }
 
   async setVolume(_options: { volume: number }): Promise<void> {}
+
+  async updateNotification(_options: {
+    title: string;
+    artist: string;
+    album?: string;
+    coverArt?: string;
+    isPlaying: boolean;
+    duration: number;
+    currentTime: number;
+    isFavorite?: boolean;
+  }): Promise<void> {}
+
+  async hideNotification(): Promise<void> {}
 
   async getPlaybackStatus(): Promise<{ isPlaying: boolean; currentPosition: number; duration: number }> {
     return { isPlaying: false, currentPosition: 0, duration: 0 };

@@ -20,16 +20,33 @@ import java.io.File
  */
 class PlaybackManager(private val context: Context) {
 
+    data class NativeQueueTrack(
+        val id: String,
+        val uri: String?,
+        val title: String,
+        val artist: String,
+        val album: String?,
+        val coverArt: String?,
+        val duration: Long,
+        val isFavorite: Boolean
+    )
+
     private var mediaPlayer: MediaPlayer? = null
     private var isPrepared: Boolean = false
     private val handler = Handler(Looper.getMainLooper())
     private var progressRunnable: Runnable? = null
+
+    val nativeQueue = mutableListOf<NativeQueueTrack>()
+    var currentQueueIndex: Int = -1
+    var repeatMode: String = "all" // "off", "all", "one"
+    var isShuffle: Boolean = false
 
     var onPreparedCallback: ((durationMs: Int, positionMs: Int) -> Unit)? = null
     var onCompletionCallback: (() -> Unit)? = null
     var onErrorCallback: ((what: Int, extra: Int, message: String) -> Unit)? = null
     var onProgressCallback: ((positionMs: Int, durationMs: Int) -> Unit)? = null
     var onStateChangeCallback: ((isPlaying: Boolean) -> Unit)? = null
+    var onTrackAutoAdvancedCallback: ((track: NativeQueueTrack, index: Int) -> Unit)? = null
 
     val isPlaying: Boolean
         get() = try {
@@ -127,6 +144,27 @@ class PlaybackManager(private val context: Context) {
                 setOnCompletionListener {
                     stopProgressUpdates()
                     onStateChangeCallback?.invoke(false)
+
+                    // 1. Repeat single track: loop immediately
+                    if (repeatMode == "one" && isPrepared) {
+                        try {
+                            mediaPlayer?.seekTo(0)
+                            mediaPlayer?.start()
+                            onStateChangeCallback?.invoke(true)
+                            startProgressUpdates()
+                            return@setOnCompletionListener
+                        } catch (_: Exception) {}
+                    }
+
+                    // 2. Continuous playback: seamlessly advance to next track in native queue
+                    if (nativeQueue.isNotEmpty()) {
+                        val nextIdx = getNextIndex()
+                        if (nextIdx != -1) {
+                            playQueueItemAt(nextIdx)
+                            return@setOnCompletionListener
+                        }
+                    }
+
                     onCompletionCallback?.invoke()
                 }
 
@@ -220,5 +258,75 @@ class PlaybackManager(private val context: Context) {
     private fun stopProgressUpdates() {
         progressRunnable?.let { handler.removeCallbacks(it) }
         progressRunnable = null
+    }
+
+    fun setQueue(items: List<NativeQueueTrack>, startIndex: Int, repeat: String?, shuffle: Boolean?) {
+        nativeQueue.clear()
+        nativeQueue.addAll(items)
+        currentQueueIndex = startIndex
+        if (!repeat.isNullOrBlank()) repeatMode = repeat
+        if (shuffle != null) isShuffle = shuffle
+    }
+
+    fun setPlaybackMode(repeat: String?, shuffle: Boolean?) {
+        if (!repeat.isNullOrBlank()) repeatMode = repeat
+        if (shuffle != null) isShuffle = shuffle
+    }
+
+    fun getNextIndex(): Int {
+        if (nativeQueue.isEmpty()) return -1
+        if (isShuffle) {
+            if (nativeQueue.size > 1) {
+                var rand = (0 until (nativeQueue.size - 1)).random()
+                if (currentQueueIndex != -1 && rand >= currentQueueIndex) {
+                    rand += 1
+                }
+                return rand
+            }
+            return 0
+        }
+        // Strict, sequential next order (0 -> 1 -> 2 -> 3 ...)
+        if (currentQueueIndex == -1) return 0
+        val next = currentQueueIndex + 1
+        if (next >= nativeQueue.size) {
+            return if (repeatMode == "all") 0 else -1
+        }
+        return next
+    }
+
+    fun getPreviousIndex(): Int {
+        if (nativeQueue.isEmpty()) return -1
+        if (currentQueueIndex <= 0) {
+            return nativeQueue.size - 1
+        }
+        return currentQueueIndex - 1
+    }
+
+    fun playNext(): Boolean {
+        if (nativeQueue.isEmpty()) return false
+        val nextIdx = getNextIndex()
+        if (nextIdx != -1) {
+            playQueueItemAt(nextIdx)
+            return true
+        }
+        return false
+    }
+
+    fun playPrevious(): Boolean {
+        if (nativeQueue.isEmpty()) return false
+        val prevIdx = getPreviousIndex()
+        if (prevIdx != -1) {
+            playQueueItemAt(prevIdx)
+            return true
+        }
+        return false
+    }
+
+    fun playQueueItemAt(index: Int) {
+        if (index < 0 || index >= nativeQueue.size) return
+        currentQueueIndex = index
+        val item = nativeQueue[index]
+        playTrack(item.uri, item.id)
+        onTrackAutoAdvancedCallback?.invoke(item, index)
     }
 }

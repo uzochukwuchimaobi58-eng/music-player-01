@@ -7,8 +7,8 @@ import {
   Folder as FolderIcon,
   FolderOpen,
   ArrowUpDown,
-  Download,
   CheckCircle2,
+  Download,
   Plus,
   Trash2,
   FileText,
@@ -18,6 +18,7 @@ import {
   ArrowLeft
 } from 'lucide-react';
 import { Track, Playlist, ActiveView } from '../types';
+import { compareMusicTitles, compareMusicArtists } from '../utils/trackSort';
 
 interface TrackListProps {
   view: ActiveView;
@@ -26,7 +27,7 @@ interface TrackListProps {
   allPlaylists: Playlist[];
   currentTrackId: string | null;
   isPlaying: boolean;
-  onPlayTrack: (track: Track) => void;
+  onPlayTrack: (track: Track, queue?: Track[]) => void;
   onToggleFavorite: (trackId: string) => void;
   onMakeOffline: (track: Track) => void;
   onAddToPlaylist: (trackId: string, playlistId: string) => void;
@@ -88,12 +89,14 @@ export const TrackList: React.FC<TrackListProps> = ({
     }));
   }, [tracks]);
 
-  // Determine tracks to display
+  // Determine tracks to display (stopping at owner music library if owner tracks exist)
   const baseTracks = useMemo(() => {
+    const ownerTracks = tracks.filter((t) => t.sourceType !== 'built-in');
+    const effectiveTracks = ownerTracks.length > 0 ? ownerTracks : tracks;
     if (view === 'folder' && selectedFolder) {
-      return tracks.filter((t) => (t.folder || 'Phone Storage') === selectedFolder);
+      return effectiveTracks.filter((t) => (t.folder || 'Phone Storage') === selectedFolder);
     }
-    return tracks;
+    return effectiveTracks;
   }, [view, selectedFolder, tracks]);
 
   // Sort and filter tracks
@@ -110,11 +113,11 @@ export const TrackList: React.FC<TrackListProps> = ({
 
   const sortedTracks = useMemo(() => {
     return [...filtered].sort((a, b) => {
-      if (sortBy === 'title') return a.title.localeCompare(b.title);
-      if (sortBy === 'artist') return a.artist.localeCompare(b.artist);
+      if (sortBy === 'title') return compareMusicTitles(a.title, b.title);
+      if (sortBy === 'artist') return compareMusicArtists(a.artist, b.artist);
       if (sortBy === 'playCount') return (b.playCount || 0) - (a.playCount || 0);
       if (sortBy === 'duration') return b.duration - a.duration;
-      return 0;
+      return compareMusicTitles(a.title, b.title);
     });
   }, [filtered, sortBy]);
 
@@ -304,7 +307,7 @@ export const TrackList: React.FC<TrackListProps> = ({
                 {/* Left: Index / Cover / Info */}
                 <div
                   className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer"
-                  onClick={() => onPlayTrack(track)}
+                  onClick={() => onPlayTrack(track, sortedTracks)}
                 >
                   {/* Track Artwork / Play indicator */}
                   <div className="relative w-11 h-11 rounded-lg overflow-hidden shrink-0 bg-zinc-950 border border-zinc-800">

@@ -36,6 +36,7 @@ import {
 } from './services/deviceScanner';
 import { audioEngine, TrendingAudioEffect } from './services/audioEngine';
 import { getThemeConfig } from './data/themes';
+import { Capacitor } from '@capacitor/core';
 import { MusicLibrary } from './plugins/MusicLibrary';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
@@ -68,11 +69,12 @@ import { WelcomeSplashScreen } from './components/WelcomeSplashScreen';
 import { AffiliateProduct } from './types';
 import { loadAffiliateProducts } from './data/affiliateProducts';
 import { subscribeToCloudAffiliateProducts } from './services/affiliateService';
+import { sortTracksAlphabetical } from './utils/trackSort';
 
 export default function App() {
   // --- Persistent State ---
   const [showWelcome, setShowWelcome] = useState<boolean>(true);
-  const [tracks, setTracks] = useState<Track[]>(() => loadStoredTracks());
+  const [tracks, setTracks] = useState<Track[]>(() => sortTracksAlphabetical(loadStoredTracks()));
   const [playlists, setPlaylists] = useState<Playlist[]>(() => loadStoredPlaylists());
   const [theme, setTheme] = useState<AppTheme>(() => loadStoredTheme());
   const [eqSettings, setEqSettings] = useState<EqualizerSettings>(() => loadStoredEq());
@@ -135,7 +137,7 @@ export default function App() {
   useEffect(() => {
     loadTracksFromIDB().then((idbTracks) => {
       if (idbTracks && idbTracks.length > 0) {
-        setTracks(idbTracks);
+        setTracks(sortTracksAlphabetical(idbTracks));
       }
     });
   }, []);
@@ -157,10 +159,29 @@ export default function App() {
   // --- Active Queue State ---
   const [activeQueue, setActiveQueue] = useState<Track[]>(() => tracks);
 
+  // Keep activeQueue in sync when tracks load/update if activeQueue is empty or missing current track
+  useEffect(() => {
+    if (tracks.length > 0) {
+      setActiveQueue((prev) => {
+        if (prev.length === 0) return tracks;
+        if (currentTrackId && !prev.some((t) => t.id === currentTrackId)) {
+          if (tracks.some((t) => t.id === currentTrackId)) return tracks;
+        }
+        return prev;
+      });
+    }
+  }, [tracks, currentTrackId]);
+
   // --- Sleep Timer State ---
   const [sleepTimerRemaining, setSleepTimerRemaining] = useState<number | null>(null);
   const sleepTimerRef = useRef<number | null>(null);
   const handleNextTrackRef = useRef<(forcePlay?: boolean) => void>(() => {});
+  const handlePrevTrackRef = useRef<() => void>(() => {});
+  const handleTogglePlayRef = useRef<() => void>(() => {});
+  const handleSeekRef = useRef<(sec: number) => void>(() => {});
+  const handleToggleFavoriteRef = useRef<(id: string) => void>(() => {});
+  const handleTrackEndRef = useRef<() => void>(() => {});
+  const handleNativeAutoAdvancedRef = useRef<(trackId: string) => void>(() => {});
 
   // Derive Current Track
   const currentTrack = useMemo(() => {
@@ -295,28 +316,173 @@ export default function App() {
     };
   }, [playerSettings.shakeToPlayNext]);
 
-  // Car bluetooth / status bar lyrics sync
+  // Lock screen media session & media notification controller (Web & Android)
   useEffect(() => {
     if (!currentTrack) return;
+
     if (playerSettings.statusBarLyrics !== 'off' && isPlaying) {
       document.title = `▶ ${currentTrack.title} - ${currentTrack.artist}`;
     } else {
       document.title = 'Music Player';
     }
 
+    // 1. Web MediaSession API (Lock screen widget on Android Chrome, PWA & browsers)
     if ('mediaSession' in navigator) {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: currentTrack.title,
-        artist:
-          currentTrack.artist +
-          (playerSettings.carBluetoothLyrics && currentTrack.lyrics
-            ? ` | ${currentTrack.lyrics.slice(0, 50)}...`
-            : ''),
-        album: currentTrack.album,
-        artwork: [{ src: currentTrack.coverArt, sizes: '512x512', type: 'image/jpeg' }],
-      });
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: currentTrack.title,
+          artist:
+            currentTrack.artist +
+            (playerSettings.carBluetoothLyrics && currentTrack.lyrics
+              ? ` | ${currentTrack.lyrics.slice(0, 50)}...`
+              : ''),
+          album: currentTrack.album || 'Sonance Music',
+          artwork: [
+            { src: currentTrack.coverArt, sizes: '96x96', type: 'image/jpeg' },
+            { src: currentTrack.coverArt, sizes: '128x128', type: 'image/jpeg' },
+            { src: currentTrack.coverArt, sizes: '192x192', type: 'image/jpeg' },
+            { src: currentTrack.coverArt, sizes: '256x256', type: 'image/jpeg' },
+            { src: currentTrack.coverArt, sizes: '384x384', type: 'image/jpeg' },
+            { src: currentTrack.coverArt, sizes: '512x512', type: 'image/jpeg' },
+          ],
+        });
+
+        navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+
+        navigator.mediaSession.setActionHandler('play', () => {
+          handleTogglePlayRef.current();
+        });
+        navigator.mediaSession.setActionHandler('pause', () => {
+          handleTogglePlayRef.current();
+        });
+        navigator.mediaSession.setActionHandler('previoustrack', () => {
+          handlePrevTrackRef.current();
+        });
+        navigator.mediaSession.setActionHandler('nexttrack', () => {
+          handleNextTrackRef.current(true);
+        });
+        navigator.mediaSession.setActionHandler('seekto', (details) => {
+          if (details.seekTime !== undefined && !isNaN(details.seekTime)) {
+            handleSeekRef.current(details.seekTime);
+          }
+        });
+        navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+          handleSeekRef.current(Math.max(0, currentTime - (details.seekOffset || 10)));
+        });
+        navigator.mediaSession.setActionHandler('seekforward', (details) => {
+          handleSeekRef.current(Math.min(duration, currentTime + (details.seekOffset || 10)));
+        });
+        navigator.mediaSession.setActionHandler('stop', () => {
+          audioEngine.pause();
+          setIsPlaying(false);
+          if (Capacitor.isNativePlatform()) {
+            MusicLibrary.hideNotification().catch(() => {});
+          }
+        });
+      } catch (err) {
+        console.debug('MediaSession action handler error:', err);
+      }
     }
-  }, [currentTrack, isPlaying, playerSettings.statusBarLyrics, playerSettings.carBluetoothLyrics]);
+
+    // 2. Native Android Foreground Service & MediaStyle Lock Screen Notification
+    if (Capacitor.isNativePlatform()) {
+      MusicLibrary.updateNotification({
+        title: currentTrack.title,
+        artist: currentTrack.artist,
+        album: currentTrack.album,
+        coverArt: currentTrack.coverArt,
+        isPlaying,
+        duration: duration > 0 ? duration * 1000 : (currentTrack.duration || 0) * 1000,
+        currentTime: currentTime * 1000,
+        isFavorite: currentTrack.isFavorite,
+      }).catch((e) => console.debug('Failed to update native notification:', e));
+    }
+  }, [
+    currentTrack,
+    isPlaying,
+    playerSettings.statusBarLyrics,
+    playerSettings.carBluetoothLyrics,
+  ]);
+
+  // Sync timeline progress scrubber with system lock screen widget
+  useEffect(() => {
+    if (!currentTrack || duration <= 0 || isNaN(duration) || isNaN(currentTime)) return;
+
+    if ('mediaSession' in navigator && 'setPositionState' in navigator.mediaSession) {
+      try {
+        navigator.mediaSession.setPositionState({
+          duration: Math.max(0, duration),
+          playbackRate: playbackRate || 1,
+          position: Math.min(Math.max(0, currentTime), duration),
+        });
+      } catch {
+        // ignore unsupported browser states
+      }
+    }
+  }, [currentTime, duration, playbackRate, currentTrack]);
+
+  // Listen for actions and auto-advancement from Android native notification & lock screen controls
+  useEffect(() => {
+    let mediaSub: any = null;
+    let autoAdvSub: any = null;
+    const registerNativeMediaActions = async () => {
+      try {
+        mediaSub = await MusicLibrary.addListener('mediaAction', (event) => {
+          switch (event.type) {
+            case 'play':
+            case 'pause':
+              if (!Capacitor.isNativePlatform()) {
+                handleTogglePlayRef.current();
+              }
+              break;
+            case 'next':
+              if (!Capacitor.isNativePlatform()) {
+                handleNextTrackRef.current(true);
+              }
+              break;
+            case 'previous':
+              if (!Capacitor.isNativePlatform()) {
+                handlePrevTrackRef.current();
+              }
+              break;
+            case 'seekTo':
+              if (event.position !== undefined) {
+                handleSeekRef.current(event.position / 1000);
+              }
+              break;
+            case 'favorite':
+              if (currentTrackId) {
+                handleToggleFavoriteRef.current(currentTrackId);
+              }
+              break;
+            case 'close':
+              audioEngine.pause();
+              setIsPlaying(false);
+              MusicLibrary.hideNotification().catch(() => {});
+              break;
+          }
+        });
+
+        autoAdvSub = await MusicLibrary.addListener('trackAutoAdvanced', (event) => {
+          if (event && event.id) {
+            handleNativeAutoAdvancedRef.current(event.id);
+          }
+        });
+      } catch (e) {
+        console.debug('Native mediaAction listener registration:', e);
+      }
+    };
+    registerNativeMediaActions();
+
+    return () => {
+      if (mediaSub && typeof mediaSub.remove === 'function') {
+        mediaSub.remove();
+      }
+      if (autoAdvSub && typeof autoAdvSub.remove === 'function') {
+        autoAdvSub.remove();
+      }
+    };
+  }, [currentTrackId]);
 
   // Restore persistent device audio blobs & auto-scan phone folders on startup via MusicLibrary.scanSongs()
   useEffect(() => {
@@ -345,12 +511,9 @@ export default function App() {
               sourceType: 'user-upload',
             }));
 
-            setTracks((prev) => {
-              const unique = nativeTracks.filter(
-                (nt) => !prev.some((et) => et.title === nt.title && et.artist === nt.artist)
-              );
-              return unique.length > 0 ? [...unique, ...prev] : prev;
-            });
+            const sortedNative = sortTracksAlphabetical(nativeTracks);
+            setTracks(sortedNative);
+            saveStoredTracks(sortedNative);
             setAutoSyncToast(`Loaded ${scanResult.songs.length} phone songs from MediaStore`);
             setTimeout(() => setAutoSyncToast(null), 4000);
             return;
@@ -362,12 +525,9 @@ export default function App() {
         // Auto-scan saved phone storage folders in web preview / browser fallback
         const autoScanned = await autoScanStoredDirectory();
         if (autoScanned.length > 0) {
-          setTracks((prev) => {
-            const unique = autoScanned.filter(
-              (nt) => !prev.some((et) => et.title === nt.title && et.artist === nt.artist)
-            );
-            return unique.length > 0 ? [...unique, ...prev] : prev;
-          });
+          const sortedAuto = sortTracksAlphabetical(autoScanned);
+          setTracks(sortedAuto);
+          saveStoredTracks(sortedAuto);
           setAutoSyncToast(`Auto-synced ${autoScanned.length} phone songs`);
           setTimeout(() => setAutoSyncToast(null), 4000);
         } else {
@@ -526,13 +686,20 @@ export default function App() {
     });
 
     const unsubEnded = audioEngine.onTrackEnd(() => {
-      handleTrackEnd();
+      handleTrackEndRef.current();
+    });
+
+    const unsubAutoAdvanced = audioEngine.onTrackAutoAdvanced((evt) => {
+      if (evt && evt.id) {
+        handleNativeAutoAdvancedRef.current(evt.id);
+      }
     });
 
     return () => {
       unsubTime();
       unsubState();
       unsubEnded();
+      unsubAutoAdvanced();
     };
   }, []);
 
@@ -571,8 +738,22 @@ export default function App() {
     };
   }, [sleepTimerRemaining, volume]);
 
-  // Load and play track
-  const loadAndPlayTrack = async (track: Track, autoPlay: boolean = true) => {
+  // Load and play track with robust queue context and native synchronization
+  const loadAndPlayTrack = async (
+    track: Track,
+    autoPlay: boolean = true,
+    newQueue?: Track[]
+  ) => {
+    const queueToUse =
+      newQueue && newQueue.length > 0
+        ? newQueue
+        : activeQueue.length > 0 && activeQueue.some((t) => t.id === track.id)
+        ? activeQueue
+        : tracks.length > 0 && tracks.some((t) => t.id === track.id)
+        ? tracks
+        : [track];
+
+    setActiveQueue(queueToUse);
     setCurrentTrackId(track.id);
 
     // Update play stats
@@ -588,16 +769,24 @@ export default function App() {
       )
     );
 
+    const currentIdx = queueToUse.findIndex((t) => t.id === track.id);
+    const options = {
+      queue: queueToUse,
+      currentIndex: currentIdx >= 0 ? currentIdx : 0,
+      repeatMode,
+      isShuffle,
+    };
+
     try {
       const cachedBlob = await getAudioBlobOffline(track.id);
       if (cachedBlob) {
         const localBlobUrl = URL.createObjectURL(cachedBlob);
-        await audioEngine.loadTrack(localBlobUrl, track);
+        await audioEngine.loadTrack(localBlobUrl, track, options);
       } else {
-        await audioEngine.loadTrack(track.url, track);
+        await audioEngine.loadTrack(track.url, track, options);
       }
     } catch {
-      await audioEngine.loadTrack(track.url, track);
+      await audioEngine.loadTrack(track.url, track, options);
     }
 
     if (autoPlay) {
@@ -623,54 +812,91 @@ export default function App() {
       setPausedNextPressCount(0);
     }
   };
+  handleTogglePlayRef.current = handleTogglePlay;
 
+  // Next Track: Strictly sequential ordering in current queue unless Shuffle is explicitly on
   const handleNextTrack = (forcePlay: boolean = false) => {
-    if (activeQueue.length === 0) return;
-    const currentIndex = activeQueue.findIndex((t) => t.id === currentTrackId);
+    const effectiveQueue =
+      activeQueue.length > 0 && activeQueue.some((t) => t.id === currentTrackId)
+        ? activeQueue
+        : tracks.length > 0
+        ? tracks
+        : activeQueue;
+
+    if (effectiveQueue.length === 0) return;
+    const currentIndex = effectiveQueue.findIndex((t) => t.id === currentTrackId);
     let nextIndex = 0;
 
     if (isShuffle) {
-      nextIndex = Math.floor(Math.random() * activeQueue.length);
+      if (effectiveQueue.length > 1) {
+        let rand = Math.floor(Math.random() * (effectiveQueue.length - 1));
+        if (currentIndex !== -1 && rand >= currentIndex) {
+          rand += 1;
+        }
+        nextIndex = rand;
+      } else {
+        nextIndex = 0;
+      }
     } else {
-      nextIndex = (currentIndex + 1) % activeQueue.length;
+      // Guaranteed strictly sequential: consecutive next track
+      if (currentIndex === -1) {
+        nextIndex = 0;
+      } else {
+        nextIndex = (currentIndex + 1) % effectiveQueue.length;
+      }
     }
 
-    const nextTrack = activeQueue[nextIndex];
+    const nextTrack = effectiveQueue[nextIndex];
+    if (!nextTrack) return;
 
     // When paused and not forcing play:
     // First tap on next cues track without playing; pressing another next starts playback
     if (!isPlaying && !forcePlay) {
       if (pausedNextPressCount === 0) {
         setPausedNextPressCount(1);
-        loadAndPlayTrack(nextTrack, false);
+        loadAndPlayTrack(nextTrack, false, effectiveQueue);
       } else {
         setPausedNextPressCount(0);
-        loadAndPlayTrack(nextTrack, true);
+        loadAndPlayTrack(nextTrack, true, effectiveQueue);
       }
     } else {
       setPausedNextPressCount(0);
-      loadAndPlayTrack(nextTrack, true);
+      loadAndPlayTrack(nextTrack, true, effectiveQueue);
     }
   };
   handleNextTrackRef.current = handleNextTrack;
 
   const handlePrevTrack = () => {
-    if (activeQueue.length === 0) return;
-    const currentIndex = activeQueue.findIndex((t) => t.id === currentTrackId);
-    let prevIndex = currentIndex - 1;
-    if (prevIndex < 0) prevIndex = activeQueue.length - 1;
+    const effectiveQueue =
+      activeQueue.length > 0 && activeQueue.some((t) => t.id === currentTrackId)
+        ? activeQueue
+        : tracks.length > 0
+        ? tracks
+        : activeQueue;
 
-    const prevTrack = activeQueue[prevIndex];
+    if (effectiveQueue.length === 0) return;
+    const currentIndex = effectiveQueue.findIndex((t) => t.id === currentTrackId);
+    let prevIndex = 0;
+    if (currentIndex <= 0) {
+      prevIndex = effectiveQueue.length - 1;
+    } else {
+      prevIndex = currentIndex - 1;
+    }
+
+    const prevTrack = effectiveQueue[prevIndex];
+    if (!prevTrack) return;
 
     // When paused, navigating back cues track without playing
     if (!isPlaying) {
       setPausedNextPressCount(0);
-      loadAndPlayTrack(prevTrack, false);
+      loadAndPlayTrack(prevTrack, false, effectiveQueue);
     } else {
-      loadAndPlayTrack(prevTrack, true);
+      loadAndPlayTrack(prevTrack, true, effectiveQueue);
     }
   };
+  handlePrevTrackRef.current = handlePrevTrack;
 
+  // Track end callback: seamless auto-advance or repeat
   const handleTrackEnd = () => {
     if (repeatMode === 'one') {
       audioEngine.seek(0);
@@ -678,24 +904,67 @@ export default function App() {
       return;
     }
 
+    const effectiveQueue =
+      activeQueue.length > 0 && activeQueue.some((t) => t.id === currentTrackId)
+        ? activeQueue
+        : tracks.length > 0
+        ? tracks
+        : activeQueue;
+
+    if (effectiveQueue.length === 0) return;
+
     if (repeatMode === 'all') {
       handleNextTrack(true);
       return;
     }
 
-    // Repeat off: stop at end of queue
-    const currentIndex = activeQueue.findIndex((t) => t.id === currentTrackId);
-    if (currentIndex < activeQueue.length - 1) {
+    // Repeat off: stop gracefully at the end of the user's library/queue
+    const currentIndex = effectiveQueue.findIndex((t) => t.id === currentTrackId);
+    if (currentIndex !== -1 && currentIndex < effectiveQueue.length - 1) {
       handleNextTrack(true);
     } else {
       setIsPlaying(false);
+      if (Capacitor.isNativePlatform()) {
+        MusicLibrary.updateNotification({
+          title: currentTrack?.title || 'Sonance Music',
+          artist: currentTrack?.artist || '',
+          album: currentTrack?.album,
+          coverArt: currentTrack?.coverArt,
+          isPlaying: false,
+          duration: (duration || 0) * 1000,
+          currentTime: (currentTime || 0) * 1000,
+          isFavorite: currentTrack?.isFavorite,
+        }).catch(() => {});
+      }
     }
   };
+  handleTrackEndRef.current = handleTrackEnd;
+
+  // Native auto-advance handler from background Android service
+  const handleNativeAutoAdvanced = (trackId: string) => {
+    const foundTrack =
+      tracks.find((t) => t.id === trackId || t.id === `native-${trackId}` || t.id.includes(trackId)) ||
+      activeQueue.find((t) => t.id === trackId || t.id === `native-${trackId}` || t.id.includes(trackId));
+
+    if (foundTrack) {
+      setCurrentTrackId(foundTrack.id);
+      setIsPlaying(true);
+      setTracks((prev) =>
+        prev.map((t) =>
+          t.id === foundTrack.id
+            ? { ...t, playCount: (t.playCount || 0) + 1, lastPlayed: Date.now() }
+            : t
+        )
+      );
+    }
+  };
+  handleNativeAutoAdvancedRef.current = handleNativeAutoAdvanced;
 
   const handleSeek = (seconds: number) => {
     setCurrentTime(seconds);
     audioEngine.seek(seconds);
   };
+  handleSeekRef.current = handleSeek;
 
   const handleVolumeChange = (newVol: number) => {
     setVolume(newVol);
@@ -714,11 +983,19 @@ export default function App() {
   };
 
   const handleToggleShuffle = () => {
-    setIsShuffle((prev) => !prev);
+    setIsShuffle((prev) => {
+      const next = !prev;
+      audioEngine.syncPlaybackMode(repeatMode, next);
+      return next;
+    });
   };
 
   const handleToggleRepeat = () => {
-    setRepeatMode((prev) => (prev === 'off' ? 'all' : prev === 'all' ? 'one' : 'off'));
+    setRepeatMode((prev) => {
+      const next = prev === 'off' ? 'all' : prev === 'all' ? 'one' : 'off';
+      audioEngine.syncPlaybackMode(next, isShuffle);
+      return next;
+    });
   };
 
   const handleToggleFavorite = (trackId: string) => {
@@ -726,6 +1003,7 @@ export default function App() {
       prev.map((t) => (t.id === trackId ? { ...t, isFavorite: !t.isFavorite } : t))
     );
   };
+  handleToggleFavoriteRef.current = handleToggleFavorite;
 
   const handleMakeOffline = async (track: Track) => {
     try {
@@ -847,10 +1125,15 @@ export default function App() {
 
   const handleAddTracks = (newTracks: Track[]) => {
     setTracks((prev) => {
+      // Exclude demo/built-in tracks if real owner tracks are added
+      const ownerPrev = prev.filter((t) => t.sourceType !== 'built-in');
       const unique = newTracks.filter(
-        (nt) => !prev.some((et) => et.title === nt.title && et.artist === nt.artist)
+        (nt) => !ownerPrev.some((et) => et.title.toLowerCase() === nt.title.toLowerCase() && et.artist.toLowerCase() === nt.artist.toLowerCase())
       );
-      return [...prev, ...unique];
+      const combined = unique.length > 0 ? [...ownerPrev, ...unique] : (ownerPrev.length > 0 ? ownerPrev : newTracks);
+      const sorted = sortTracksAlphabetical(combined);
+      saveStoredTracks(sorted);
+      return sorted;
     });
 
     confetti({
@@ -997,7 +1280,7 @@ export default function App() {
     if (targetTracks.length === 0) return;
     const finalQueue = shuffle ? [...targetTracks].sort(() => Math.random() - 0.5) : targetTracks;
     setActiveQueue(finalQueue);
-    loadAndPlayTrack(finalQueue[0], true);
+    loadAndPlayTrack(finalQueue[0], true, finalQueue);
   };
 
   // Compute view title
@@ -1116,7 +1399,7 @@ export default function App() {
                   setActiveView('home');
                   setSelectedPlaylistId(null);
                 }}
-                onPlayTrack={(track) => loadAndPlayTrack(track, true)}
+                onPlayTrack={(track, queue) => loadAndPlayTrack(track, true, queue)}
                 onPlayAll={handlePlayAll}
                 onOpenTrackActions={(track) => setActionMenuTrack(track)}
                 onOpenEqualizer={() => setIsEqOpen(true)}
@@ -1161,7 +1444,7 @@ export default function App() {
                 allPlaylists={playlists}
                 currentTrackId={currentTrackId}
                 isPlaying={isPlaying}
-                onPlayTrack={(track) => loadAndPlayTrack(track, true)}
+                onPlayTrack={(track, queue) => loadAndPlayTrack(track, true, queue || currentViewTracks)}
                 onToggleFavorite={handleToggleFavorite}
                 onMakeOffline={handleMakeOffline}
                 onAddToPlaylist={handleAddToPlaylist}
@@ -1454,10 +1737,11 @@ export default function App() {
             queue={activeQueue}
             currentTrackId={currentTrackId}
             isPlaying={isPlaying}
-            onPlayTrack={(track) => loadAndPlayTrack(track, true)}
+            onPlayTrack={(track) => loadAndPlayTrack(track, true, activeQueue)}
             onShuffleQueue={() => {
               const shuffled = [...activeQueue].sort(() => Math.random() - 0.5);
               setActiveQueue(shuffled);
+              audioEngine.syncQueue(shuffled, currentTrackId || undefined, repeatMode, isShuffle);
             }}
           />
 

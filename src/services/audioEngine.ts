@@ -31,6 +31,7 @@ class AudioEngineService {
   private timeUpdateListeners: Set<(currentTime: number, duration: number) => void> = new Set();
   private stateChangeListeners: Set<(isPlaying: boolean) => void> = new Set();
   private trackEndListeners: Set<() => void> = new Set();
+  private trackAutoAdvancedListeners: Set<(event: { id: string; index: number; title: string; artist: string }) => void> = new Set();
   private lastCurrentTime: number = 0;
   private lastDuration: number = 0;
 
@@ -229,6 +230,10 @@ class AudioEngineService {
         }
       });
 
+      await MusicLibrary.addListener('trackAutoAdvanced', (event) => {
+        this.trackAutoAdvancedListeners.forEach((cb) => cb(event));
+      });
+
       await MusicLibrary.addListener('playbackError', (err) => {
         console.warn('Native playback error:', err);
       });
@@ -259,7 +264,16 @@ class AudioEngineService {
     return this.analyser;
   }
 
-  public async loadTrack(url: string, track?: Track) {
+  public async loadTrack(
+    url: string,
+    track?: Track,
+    options?: {
+      queue?: Track[];
+      currentIndex?: number;
+      repeatMode?: string;
+      isShuffle?: boolean;
+    }
+  ) {
     this.init();
     this.setupNativeListeners();
 
@@ -288,12 +302,43 @@ class AudioEngineService {
         }
       }
 
+      // Format queue items for native Android service
+      const nativeQueue = options?.queue?.map((t) => {
+        let itemRawId: string | undefined = undefined;
+        if (t.id) {
+          const parts = t.id.split('-');
+          if (parts.length >= 2 && parts[0] === 'native') {
+            itemRawId = parts[1];
+          } else {
+            itemRawId = t.id;
+          }
+        }
+        return {
+          id: itemRawId || t.id,
+          uri: t.url,
+          title: t.title,
+          artist: t.artist,
+          album: t.album,
+          coverArt: t.coverArt,
+          duration: t.duration ? Math.round(t.duration * 1000) : 0,
+          isFavorite: t.isFavorite,
+        };
+      });
+
       try {
         await MusicLibrary.playTrack({
           uri: url,
           id: rawId,
           title: track?.title,
           artist: track?.artist,
+          album: track?.album,
+          coverArt: track?.coverArt,
+          duration: track?.duration ? Math.round(track.duration * 1000) : 0,
+          isFavorite: track?.isFavorite,
+          queue: nativeQueue,
+          currentIndex: options?.currentIndex,
+          repeatMode: options?.repeatMode,
+          isShuffle: options?.isShuffle,
         });
       } catch (err) {
         console.warn('Native MusicLibrary.playTrack error:', err);
@@ -629,6 +674,79 @@ class AudioEngineService {
   public onTrackEnd(cb: () => void): () => void {
     this.trackEndListeners.add(cb);
     return () => this.trackEndListeners.delete(cb);
+  }
+
+  public onTrackAutoAdvanced(cb: (event: { id: string; index: number; title: string; artist: string }) => void): () => void {
+    this.trackAutoAdvancedListeners.add(cb);
+    return () => this.trackAutoAdvancedListeners.delete(cb);
+  }
+
+  public async syncQueue(queue: Track[], currentId?: string, repeatMode?: string, isShuffle?: boolean) {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const nativeQueue = queue.map((t) => {
+          let itemRawId: string | undefined = undefined;
+          if (t.id) {
+            const parts = t.id.split('-');
+            if (parts.length >= 2 && parts[0] === 'native') {
+              itemRawId = parts[1];
+            } else {
+              itemRawId = t.id;
+            }
+          }
+          return {
+            id: itemRawId || t.id,
+            uri: t.url,
+            title: t.title,
+            artist: t.artist,
+            album: t.album,
+            coverArt: t.coverArt,
+            duration: t.duration ? Math.round(t.duration * 1000) : 0,
+            isFavorite: t.isFavorite,
+          };
+        });
+        await MusicLibrary.setQueue({
+          queue: nativeQueue,
+          currentId,
+          repeatMode,
+          isShuffle,
+        });
+      } catch (e) {
+        console.debug('Failed to sync queue with native service:', e);
+      }
+    }
+  }
+
+  public async syncPlaybackMode(repeatMode?: string, isShuffle?: boolean) {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        await MusicLibrary.setPlaybackMode({ repeatMode, isShuffle });
+      } catch {}
+    }
+  }
+
+  public async playNextNative(): Promise<boolean> {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const res = await MusicLibrary.playNext();
+        return res.success;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  public async playPreviousNative(): Promise<boolean> {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const res = await MusicLibrary.playPrevious();
+        return res.success;
+      } catch {
+        return false;
+      }
+    }
+    return false;
   }
 
   public isNativePlayback(): boolean {

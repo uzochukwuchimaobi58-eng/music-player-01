@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Track, AppTheme } from '../types';
 import { THEMES, ThemeDefinition } from '../data/themes';
+import { compareMusicTitles, compareMusicArtists } from '../utils/trackSort';
 
 export type LibrarySubTab = 'tracks' | 'artists' | 'albums' | 'genres' | 'folders';
 
@@ -28,7 +29,7 @@ interface LibraryViewProps {
   isPlaying: boolean;
   initialTab?: LibrarySubTab;
   onBackToHome: () => void;
-  onPlayTrack: (track: Track) => void;
+  onPlayTrack: (track: Track, queue?: Track[]) => void;
   onPlayAll: (tracks: Track[], shuffle?: boolean) => void;
   onOpenTrackActions: (track: Track) => void;
   onOpenEqualizer: () => void;
@@ -57,10 +58,16 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchInput, setShowSearchInput] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [sortBy, setSortBy] = useState<'default' | 'title' | 'artist' | 'dateAdded' | 'duration'>('default');
+  const [sortBy, setSortBy] = useState<'title' | 'artist' | 'dateAdded' | 'duration'>('title');
 
   // Dynamic Theme resolution (not permanent or hardcoded!)
   const theme: ThemeDefinition = THEMES[currentTheme] || THEMES['dark-amoled'];
+
+  // Stop at owner music library: if user has their own scanned songs, exclude built-in demo tracks
+  const ownerTracks = useMemo(() => {
+    const nonBuiltIn = tracks.filter((t) => t.sourceType !== 'built-in');
+    return nonBuiltIn.length > 0 ? nonBuiltIn : tracks;
+  }, [tracks]);
 
   // Drill-down selection within sub-tabs
   const [selectedArtist, setSelectedArtist] = useState<string | null>(null);
@@ -85,7 +92,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   // Groupings for Artists
   const artistGroups = useMemo(() => {
     const map = new Map<string, Track[]>();
-    tracks.forEach((t) => {
+    ownerTracks.forEach((t) => {
       const artist = t.artist && t.artist !== 'Unknown' ? t.artist : 'Unknown Artist';
       if (!map.has(artist)) map.set(artist, []);
       map.get(artist)!.push(t);
@@ -97,13 +104,13 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         count: items.length,
         coverArt: items[0]?.coverArt,
       }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [tracks]);
+      .sort((a, b) => compareMusicArtists(a.name, b.name));
+  }, [ownerTracks]);
 
   // Groupings for Albums
   const albumGroups = useMemo(() => {
     const map = new Map<string, Track[]>();
-    tracks.forEach((t) => {
+    ownerTracks.forEach((t) => {
       const album = t.album && t.album !== 'Unknown' ? t.album : 'Unknown Album';
       if (!map.has(album)) map.set(album, []);
       map.get(album)!.push(t);
@@ -116,13 +123,13 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         count: items.length,
         coverArt: items[0]?.coverArt,
       }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [tracks]);
+      .sort((a, b) => compareMusicTitles(a.name, b.name));
+  }, [ownerTracks]);
 
   // Groupings for Genres
   const genreGroups = useMemo(() => {
     const map = new Map<string, Track[]>();
-    tracks.forEach((t) => {
+    ownerTracks.forEach((t) => {
       const titleLower = t.title.toLowerCase();
       const artistLower = t.artist.toLowerCase();
       let genre = t.genre || 'Afrobeats';
@@ -147,13 +154,13 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         count: items.length,
         coverArt: items[0]?.coverArt,
       }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [tracks]);
+      .sort((a, b) => compareMusicTitles(a.name, b.name));
+  }, [ownerTracks]);
 
   // Groupings for Folders
   const folderGroups = useMemo(() => {
     const map = new Map<string, Track[]>();
-    tracks.forEach((t) => {
+    ownerTracks.forEach((t) => {
       const folder = t.folder || '/storage/emulated/0/Music';
       if (!map.has(folder)) map.set(folder, []);
       map.get(folder)!.push(t);
@@ -165,8 +172,8 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         count: items.length,
         coverArt: items[0]?.coverArt,
       }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [tracks]);
+      .sort((a, b) => compareMusicTitles(a.name, b.name));
+  }, [ownerTracks]);
 
   // Determine active list of tracks based on drill-down or active tab
   const currentBaseTracks = useMemo(() => {
@@ -182,7 +189,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     if (activeTab === 'folders' && selectedFolder) {
       return folderGroups.find((g) => g.name === selectedFolder)?.tracks || [];
     }
-    return tracks;
+    return ownerTracks;
   }, [
     activeTab,
     selectedArtist,
@@ -193,7 +200,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     albumGroups,
     genreGroups,
     folderGroups,
-    tracks,
+    ownerTracks,
   ]);
 
   // Search filter
@@ -208,14 +215,14 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     );
   }, [currentBaseTracks, searchQuery]);
 
-  // Sorting
+  // Natural alphabetical sorting (A to Z) without symbol or casing defects
   const sortedTracks = useMemo(() => {
     const list = [...filteredTracks];
-    if (sortBy === 'title') return list.sort((a, b) => a.title.localeCompare(b.title));
-    if (sortBy === 'artist') return list.sort((a, b) => a.artist.localeCompare(b.artist));
+    if (sortBy === 'title') return list.sort((a, b) => compareMusicTitles(a.title, b.title));
+    if (sortBy === 'artist') return list.sort((a, b) => compareMusicArtists(a.artist, b.artist));
     if (sortBy === 'duration') return list.sort((a, b) => b.duration - a.duration);
     if (sortBy === 'dateAdded') return list.sort((a, b) => b.dateAdded - a.dateAdded);
-    return list;
+    return list.sort((a, b) => compareMusicTitles(a.title, b.title));
   }, [filteredTracks, sortBy]);
 
   const visibleTracks = useMemo(() => {
@@ -583,7 +590,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                   <div
                     key={track.id}
                     id={`library-track-${track.id}`}
-                    onClick={() => onPlayTrack(track)}
+                    onClick={() => onPlayTrack(track, sortedTracks)}
                     className={`flex items-center justify-between px-3 py-2.5 rounded-lg transition-colors cursor-pointer group active:bg-white/10 ${
                       isCurrent ? 'bg-black/30' : 'hover:bg-white/5'
                     }`}

@@ -76,6 +76,52 @@ object ArtworkHelper {
         return result
     }
 
+    fun getArtworkBitmap(context: Context, songId: Long, albumId: Long, coverArtData: String? = null): Bitmap? {
+        if (!coverArtData.isNullOrBlank()) {
+            try {
+                if (coverArtData.startsWith("data:image")) {
+                    val base64Part = coverArtData.substringAfter("base64,")
+                    val decodedBytes = Base64.decode(base64Part, Base64.DEFAULT)
+                    val bmp = BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
+                    if (bmp != null) return bmp
+                }
+            } catch (_: Exception) {}
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && songId > 0) {
+            try {
+                val songUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, songId)
+                val bitmap = context.contentResolver.loadThumbnail(songUri, Size(384, 384), null)
+                if (bitmap != null) return bitmap
+            } catch (_: Exception) {}
+        }
+
+        if (albumId > 0) {
+            try {
+                val albumArtUri = ContentUris.withAppendedId(Uri.parse("content://media/external/audio/albumart"), albumId)
+                context.contentResolver.openInputStream(albumArtUri)?.use { stream ->
+                    val bitmap = BitmapFactory.decodeStream(stream)
+                    if (bitmap != null) return bitmap
+                }
+            } catch (_: Exception) {}
+        }
+
+        if (songId > 0) {
+            try {
+                val songUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, songId)
+                val mmr = MediaMetadataRetriever()
+                mmr.setDataSource(context, songUri)
+                val artBytes = mmr.embeddedPicture
+                mmr.release()
+                if (artBytes != null && artBytes.isNotEmpty()) {
+                    return BitmapFactory.decodeByteArray(artBytes, 0, artBytes.size)
+                }
+            } catch (_: Exception) {}
+        }
+
+        return null
+    }
+
     private fun bitmapToBase64(bitmap: Bitmap): String {
         // Downscale slightly if larger than 256x256 to ensure fast IPC transfer and optimal memory
         val scaled = if (bitmap.width > 256 || bitmap.height > 256) {

@@ -88,7 +88,9 @@ export const loadStoredTracks = (): Track[] => {
     if (hasMigrated) {
       saveStoredTracks(sanitized);
     }
-    return sanitized;
+    // If owner tracks exist, stop at owner music library by excluding built-in demo tracks
+    const ownerTracks = sanitized.filter((t) => t.sourceType !== 'built-in');
+    return ownerTracks.length > 0 ? ownerTracks : sanitized;
   } catch {
     return INITIAL_TRACKS;
   }
@@ -103,7 +105,8 @@ export const loadTracksFromIDB = async (): Promise<Track[] | null> => {
   try {
     const idbTracks = await get(TRACKS_IDB_KEY);
     if (Array.isArray(idbTracks) && idbTracks.length > 0) {
-      return idbTracks;
+      const ownerTracks = idbTracks.filter((t) => t.sourceType !== 'built-in');
+      return ownerTracks.length > 0 ? ownerTracks : idbTracks;
     }
     return null;
   } catch (err) {
