@@ -943,4 +943,32 @@ class MusicLibraryPlugin : Plugin() {
             call.reject("Failed to scan device music: ${e.localizedMessage ?: "Unknown error"}", "SCAN_ERROR", e)
         }
     }
+
+    @PluginMethod
+    fun minimizeApp(call: PluginCall) {
+        try {
+            activity?.let {
+                it.moveTaskToBack(true)
+                call.resolve()
+            } ?: run {
+                call.reject("Activity not available")
+            }
+        } catch (e: Exception) {
+            call.reject("Failed to minimize app: ${e.message}", "MINIMIZE_ERROR")
+        }
+    }
+
+    @PluginMethod
+    fun exitApp(call: PluginCall) {
+        try {
+            activity?.let {
+                it.finishAffinity()
+                call.resolve()
+            } ?: run {
+                call.reject("Activity not available")
+            }
+        } catch (e: Exception) {
+            call.reject("Failed to exit app: ${e.message}", "EXIT_ERROR")
+        }
+    }
 }

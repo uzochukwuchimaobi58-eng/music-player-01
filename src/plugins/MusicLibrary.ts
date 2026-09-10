@@ -98,6 +98,8 @@ export interface MusicLibraryPlugin {
   readAudioData(options: { uri?: string; id?: string }): Promise<{ filePath?: string; base64?: string; size?: number }>;
   saveAudioFile(options: { filename: string; base64Data: string; title?: string; artist?: string; duration?: number; isRingtone?: boolean; setAsRingtone?: boolean }): Promise<{ success: boolean; uri?: string; filename?: string; ringtoneSet?: boolean }>;
   setAsRingtone(options: { uri?: string; id?: string; title?: string }): Promise<{ success: boolean; uri?: string; title?: string; message?: string }>;
+  minimizeApp(): Promise<void>;
+  exitApp(): Promise<void>;
   addListener(
     eventName: 'playbackStateChange',
     listenerFunc: (state: PlaybackStateEvent) => void
@@ -216,6 +218,14 @@ export class MusicLibraryWeb extends WebPlugin implements MusicLibraryPlugin {
 
   async setAsRingtone(_options: { uri?: string; id?: string; title?: string }): Promise<{ success: boolean; uri?: string; title?: string; message?: string }> {
     return { success: true, title: _options.title, message: `Set "${_options.title}" as ringtone.` };
+  }
+
+  async minimizeApp(): Promise<void> {
+    // No-op on web
+  }
+
+  async exitApp(): Promise<void> {
+    // No-op on web
   }
 }
 

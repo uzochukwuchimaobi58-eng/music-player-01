@@ -74,6 +74,7 @@ import { AffiliateProduct } from './types';
 import { loadAffiliateProducts } from './data/affiliateProducts';
 import { subscribeToCloudAffiliateProducts } from './services/affiliateService';
 import { sortTracksAlphabetical } from './utils/trackSort';
+import { useAndroidBackButton } from './hooks/useAndroidBackButton';
 
 export default function App() {
   // --- Persistent State ---
@@ -120,6 +121,72 @@ export default function App() {
   const [artworkModalTrack, setArtworkModalTrack] = useState<Track | null>(null);
   const [ringtoneConfirmTrack, setRingtoneConfirmTrack] = useState<Track | null>(null);
   const [isDriveSafetyModalOpen, setIsDriveSafetyModalOpen] = useState(false);
+  const [backToast, setBackToast] = useState<string | null>(null);
+
+  const handleShowBackToast = (msg: string) => {
+    setBackToast(msg);
+    setTimeout(() => {
+      setBackToast((curr) => (curr === msg ? null : curr));
+    }, 2000);
+  };
+
+  // Android System Hardware Back Button & Gesture Handler
+  useAndroidBackButton({
+    showWelcome,
+    setShowWelcome,
+    ringtoneConfirmTrack,
+    setRingtoneConfirmTrack,
+    artworkModalTrack,
+    setArtworkModalTrack,
+    actionMenuTrack,
+    setActionMenuTrack,
+    isDriveSafetyModalOpen,
+    setIsDriveSafetyModalOpen,
+    isAffiliateDealsOpen,
+    setIsAffiliateDealsOpen,
+    isProModalOpen,
+    setIsProModalOpen,
+    isSleepTimerOpen,
+    setIsSleepTimerOpen,
+    isPlaylistModalOpen,
+    setIsPlaylistModalOpen,
+    setEditingPlaylist,
+    isThemeOpen,
+    setIsThemeOpen,
+    isSettingsOpen,
+    setIsSettingsOpen,
+    isScanOpen,
+    setIsScanOpen,
+    isWidgetOpen,
+    setIsWidgetOpen,
+    isHiddenFilesOpen,
+    setIsHiddenFilesOpen,
+    isRingtoneOpen,
+    setIsRingtoneOpen,
+    isKaraokeStudioOpen,
+    setIsKaraokeStudioOpen,
+    isBeatInstrumentalOpen,
+    setIsBeatInstrumentalOpen,
+    isWebBrowserOpen,
+    setIsWebBrowserOpen,
+    isEqOpen,
+    setIsEqOpen,
+    isLyricsOpen,
+    setIsLyricsOpen,
+    setLyricsTrack,
+    isQueueOpen,
+    setIsQueueOpen,
+    isSidebarOpen,
+    setIsSidebarOpen,
+    isFullPlayerOpen,
+    setIsFullPlayerOpen,
+    searchQuery,
+    setSearchQuery,
+    activeView,
+    setActiveView,
+    setSelectedPlaylistId,
+    onShowToast: handleShowBackToast,
+  });
 
   // --- Playback State & Trending FX ---
   const [currentTrackId, setCurrentTrackId] = useState<string | null>(() => {
@@ -1838,6 +1905,16 @@ export default function App() {
             >
               <div className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
               <span>{autoSyncToast}</span>
+            </div>
+          )}
+
+          {/* Android Back Button Double-Tap Exit Toast */}
+          {backToast && (
+            <div
+              id="toast-back-exit"
+              className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2 rounded-full bg-zinc-900/95 border border-zinc-700/90 text-zinc-100 text-xs font-medium shadow-2xl backdrop-blur-md pointer-events-none animate-in fade-in zoom-in-95 duration-150"
+            >
+              <span>{backToast}</span>
             </div>
           )}
 
