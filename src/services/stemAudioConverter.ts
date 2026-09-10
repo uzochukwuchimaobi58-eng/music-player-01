@@ -1,3 +1,5 @@
+import { Capacitor } from '@capacitor/core';
+import { MusicLibrary } from '../plugins/MusicLibrary';
 import { Track } from '../types';
 
 export interface StemOptions {
@@ -187,15 +189,46 @@ export async function convertAndExportTrack(
   try {
     let sourceBuffer: AudioBuffer | null = null;
 
-    // Try fetching audio arraybuffer
-    try {
-      const response = await fetch(track.url, { mode: 'cors' });
-      if (response.ok) {
-        const arrayBuf = await response.arrayBuffer();
-        sourceBuffer = await audioCtx.decodeAudioData(arrayBuf);
+    // 1. If running on native Android (or track has content:// or file:// URI), read audio via native bridge
+    if (Capacitor.isNativePlatform() || (track.url && (track.url.startsWith('content://') || track.url.startsWith('file://')))) {
+      try {
+        const audioData = await MusicLibrary.readAudioData({
+          uri: track.url,
+          id: track.id,
+        });
+
+        if (audioData.base64) {
+          const binaryString = atob(audioData.base64);
+          const len = binaryString.length;
+          const bytes = new Uint8Array(len);
+          for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          sourceBuffer = await audioCtx.decodeAudioData(bytes.buffer);
+        } else if (audioData.filePath) {
+          const fileSrc = Capacitor.convertFileSrc(audioData.filePath);
+          const response = await fetch(fileSrc);
+          if (response.ok) {
+            const arrayBuf = await response.arrayBuffer();
+            sourceBuffer = await audioCtx.decodeAudioData(arrayBuf);
+          }
+        }
+      } catch (nativeReadErr) {
+        console.warn('Native readAudioData failed:', nativeReadErr);
       }
-    } catch {
-      // CORS or network fallback
+    }
+
+    // 2. Web fallback or remote URL fetch
+    if (!sourceBuffer && track.url) {
+      try {
+        const response = await fetch(track.url, { mode: 'cors' });
+        if (response.ok) {
+          const arrayBuf = await response.arrayBuffer();
+          sourceBuffer = await audioCtx.decodeAudioData(arrayBuf);
+        }
+      } catch {
+        // CORS or network fallback
+      }
     }
 
     // If sourceBuffer could not be decoded directly from remote CORS:
@@ -262,6 +295,52 @@ export async function convertAndExportTrack(
       audioCtx.close().catch(() => {});
     }
   }
+}
+
+/**
+ * Saves the generated audio directly to the user's phone storage (via native MediaStore on Android)
+ * or triggers a standard browser download on web.
+ */
+export async function saveAudioToDevice(
+  blob: Blob,
+  filename: string,
+  meta?: { title?: string; artist?: string; duration?: number; isRingtone?: boolean; setAsRingtone?: boolean }
+): Promise<{ success: boolean; uri?: string; ringtoneSet?: boolean }> {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      // Convert blob to base64 string
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const res = reader.result as string;
+          const cleanBase64 = res.includes(',') ? res.split(',')[1] : res;
+          resolve(cleanBase64);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+
+      const res = await MusicLibrary.saveAudioFile({
+        filename,
+        base64Data: base64,
+        title: meta?.title || filename.replace('.wav', ''),
+        artist: meta?.artist || 'Sonance Studio',
+        duration: meta?.duration ? Math.round(meta.duration * 1000) : 0,
+        isRingtone: meta?.isRingtone,
+        setAsRingtone: meta?.setAsRingtone,
+      });
+
+      if (res && res.success) {
+        return { success: true, uri: res.uri, ringtoneSet: res.ringtoneSet };
+      }
+    } catch (err) {
+      console.warn('Native saveAudioFile failed, falling back to download:', err);
+    }
+  }
+
+  // Web download fallback:
+  downloadBlobToPhone(blob, filename);
+  return { success: true };
 }
 
 /**

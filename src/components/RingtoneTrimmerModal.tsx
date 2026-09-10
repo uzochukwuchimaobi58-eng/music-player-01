@@ -21,7 +21,13 @@ import {
   Image as ImageIcon
 } from 'lucide-react';
 import { Track } from '../types';
-import { trimAudioTrack, TrimResult, downloadBlobToPhone } from '../services/audioTrimmer';
+import {
+  trimAudioTrack,
+  TrimResult,
+  downloadBlobToPhone,
+  saveAudioToDevice,
+  getTrackPlayableAudioUrl
+} from '../services/audioTrimmer';
 
 interface RingtoneTrimmerModalProps {
   isOpen: boolean;
@@ -58,6 +64,8 @@ export const RingtoneTrimmerModal: React.FC<RingtoneTrimmerModalProps> = ({
   const [ringtoneTarget, setRingtoneTarget] = useState<'ringtone' | 'alarm' | 'notification'>('ringtone');
   const [trimmedResult, setTrimmedResult] = useState<TrimResult | null>(null);
   const [isPlayingTrimmedAudio, setIsPlayingTrimmedAudio] = useState(false);
+  const [playableUrl, setPlayableUrl] = useState<string>('');
+  const [setAsPhoneRingtoneImmediately, setSetAsPhoneRingtoneImmediately] = useState<boolean>(true);
   const trimmedAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // --- Batch Tag Editor States ---
@@ -72,6 +80,7 @@ export const RingtoneTrimmerModal: React.FC<RingtoneTrimmerModalProps> = ({
   const playCheckInterval = useRef<number | null>(null);
 
   useEffect(() => {
+    let active = true;
     if (track) {
       setStartTime(0);
       const defaultDuration = Math.min(30, track.duration || 30);
@@ -81,7 +90,19 @@ export const RingtoneTrimmerModal: React.FC<RingtoneTrimmerModalProps> = ({
       setBatchAlbum(track.album || '');
       setBatchGenre(track.genre || '');
       setBatchYear(track.year ? track.year.toString() : '2025');
+
+      getTrackPlayableAudioUrl(track).then((url) => {
+        if (active && url) {
+          setPlayableUrl(url);
+          if (snippetAudioRef.current) {
+            snippetAudioRef.current.src = url;
+          }
+        }
+      });
     }
+    return () => {
+      active = false;
+    };
   }, [track]);
 
   useEffect(() => {
@@ -113,8 +134,11 @@ export const RingtoneTrimmerModal: React.FC<RingtoneTrimmerModalProps> = ({
       if (playCheckInterval.current) clearInterval(playCheckInterval.current);
       setIsPlayingSnippet(false);
     } else {
+      const audioSource = playableUrl || track.url;
       if (!snippetAudioRef.current) {
-        snippetAudioRef.current = new Audio(track.url);
+        snippetAudioRef.current = new Audio(audioSource);
+      } else if (snippetAudioRef.current.src !== audioSource) {
+        snippetAudioRef.current.src = audioSource;
       }
       const audio = snippetAudioRef.current;
       audio.currentTime = startTime;
@@ -160,7 +184,7 @@ export const RingtoneTrimmerModal: React.FC<RingtoneTrimmerModalProps> = ({
     setExportSuccess(null);
 
     try {
-      // Execute true client-side audio slicing and encoding
+      // Execute true audio slicing and encoding
       const result = await trimAudioTrack(track, startTime, endTime, {
         fadeIn,
         fadeOut,
@@ -169,17 +193,29 @@ export const RingtoneTrimmerModal: React.FC<RingtoneTrimmerModalProps> = ({
 
       setTrimmedResult(result);
 
-      // Direct save to phone storage / Downloads folder
-      downloadBlobToPhone(result.blob, result.filename);
+      // Save directly to phone via native MediaStore on Android, with automatic ringtone indexing
+      const saveRes = await saveAudioToDevice(result.blob, result.filename, {
+        title: `${track.title} (Trimmed)`,
+        artist: track.artist || 'Sonance Studio',
+        duration: result.duration,
+        isRingtone: true,
+        setAsRingtone: setAsPhoneRingtoneImmediately,
+      });
 
       // Add to user's offline audio library
       if (onAddTrackToLibrary) {
         onAddTrackToLibrary(result.trimmedTrack);
       }
 
-      setExportSuccess(
-        `Saved to phone! Downloaded "${result.filename}" (${result.duration}s) to device storage.`
-      );
+      if (saveRes && saveRes.ringtoneSet) {
+        setExportSuccess(
+          `Success! Saved "${result.filename}" to your phone's Ringtones and activated as your default ringtone.`
+        );
+      } else {
+        setExportSuccess(
+          `Saved to phone! Exported "${result.filename}" (${result.duration}s) to device Ringtones folder.`
+        );
+      }
     } catch (err) {
       console.error('Trimming audio failed:', err);
       setExportSuccess('Trimming audio failed. Please try a different track or range.');
@@ -470,6 +506,20 @@ export const RingtoneTrimmerModal: React.FC<RingtoneTrimmerModalProps> = ({
                   <span>Alert Tone</span>
                 </button>
               </div>
+
+              {/* Immediate Ringtone Activation Checkbox */}
+              <label className="mt-2.5 flex items-center gap-2.5 p-2.5 rounded-xl bg-indigo-950/30 border border-indigo-500/30 text-xs text-indigo-200 cursor-pointer hover:bg-indigo-950/50 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={setAsPhoneRingtoneImmediately}
+                  onChange={(e) => setSetAsPhoneRingtoneImmediately(e.target.checked)}
+                  className="rounded accent-emerald-500 w-4 h-4 cursor-pointer"
+                />
+                <div className="flex-1">
+                  <span className="font-semibold block">Set as active phone ringtone immediately</span>
+                  <span className="text-[10px] text-zinc-400">Applies directly to phone incoming calls when saved</span>
+                </div>
+              </label>
             </div>
 
             {/* Trimmed Result Preview & Download Card */}

@@ -60,6 +60,16 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [sortBy, setSortBy] = useState<'title' | 'artist' | 'dateAdded' | 'duration'>('title');
 
+  // Disappearing / Appearing upper header + sub-tabs on scroll:
+  // - Scrolling down: smoothly slides up out of view (-translate-y-full)
+  // - Scrolling up: immediately slides back down into view (translate-y-0)
+  // - Near top (scrollTop <= 15): always visible
+  // - Active search or open menu: kept visible
+  const [isHeaderVisible, setIsHeaderVisible] = useState(true);
+  const lastScrollTopRef = useRef(0);
+  const touchStartYRef = useRef<number | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
   // Dynamic Theme resolution (not permanent or hardcoded!)
   const theme: ThemeDefinition = THEMES[currentTheme] || THEMES['dark-amoled'];
 
@@ -87,6 +97,8 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     setSelectedGenre(null);
     setSelectedFolder(null);
     setVisibleCount(80);
+    setIsHeaderVisible(true);
+    lastScrollTopRef.current = 0;
   };
 
   // Groupings for Artists
@@ -258,8 +270,127 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     return 'MUSIC LIBRARY';
   };
 
+  // Scroll and touch listeners to auto-hide upper header on scroll-down and immediately show on scroll-up
+  useEffect(() => {
+    const getScrollY = (): number => {
+      const mainEl = document.getElementById('app-main-content') || document.querySelector('main');
+      const mainScroll = mainEl ? mainEl.scrollTop : 0;
+      const winScroll = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+      const containerScroll = containerRef.current ? containerRef.current.scrollTop : 0;
+      return Math.max(mainScroll, winScroll, containerScroll);
+    };
+
+    lastScrollTopRef.current = getScrollY();
+
+    const handleScroll = () => {
+      const currentScroll = getScrollY();
+
+      // Always show when near the very top of the list
+      if (currentScroll <= 15) {
+        setIsHeaderVisible(true);
+        lastScrollTopRef.current = currentScroll;
+        return;
+      }
+
+      // Do not hide while search input is active or options menu is open
+      if (showSearchInput || isMenuOpen) {
+        setIsHeaderVisible(true);
+        lastScrollTopRef.current = currentScroll;
+        return;
+      }
+
+      const delta = currentScroll - lastScrollTopRef.current;
+
+      // Scrolling UP: ANY upward movement (even 0.5px!) immediately reveals the header!
+      if (delta < -0.5) {
+        setIsHeaderVisible(true);
+      }
+      // Scrolling DOWN past top threshold -> smoothly hide header
+      else if (delta > 4 && currentScroll > 35) {
+        setIsHeaderVisible(false);
+      }
+
+      lastScrollTopRef.current = currentScroll;
+    };
+
+    // Touch gesture listeners for immediate, low-latency reaction on touchscreens / Android
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length > 0) {
+        touchStartYRef.current = e.touches[0].clientY;
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 0 || touchStartYRef.current === null) return;
+      const currentY = e.touches[0].clientY;
+      const touchDiff = currentY - touchStartYRef.current; // positive = dragged finger down = scrolling UP
+
+      // Scrolling UP gesture: user starts dragging down to see earlier songs -> show header immediately!
+      if (touchDiff > 2) {
+        setIsHeaderVisible(true);
+        touchStartYRef.current = currentY;
+      }
+      // Scrolling DOWN gesture: hide header if not at top
+      else if (touchDiff < -6) {
+        const curScroll = getScrollY();
+        if (curScroll > 35 && !showSearchInput && !isMenuOpen) {
+          setIsHeaderVisible(false);
+        }
+        touchStartYRef.current = currentY;
+      }
+    };
+
+    const handleTouchEnd = () => {
+      touchStartYRef.current = null;
+    };
+
+    // Wheel event for desktop / trackpad / mouse
+    const handleWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) {
+        // Scrolling up -> immediately show header
+        setIsHeaderVisible(true);
+      } else if (e.deltaY > 6) {
+        const curScroll = getScrollY();
+        if (curScroll > 35 && !showSearchInput && !isMenuOpen) {
+          setIsHeaderVisible(false);
+        }
+      }
+    };
+
+    // Attach global window listeners with capture to ensure all scroll and touch events are received
+    window.addEventListener('scroll', handleScroll, { passive: true, capture: true });
+    window.addEventListener('touchstart', handleTouchStart, { passive: true });
+    window.addEventListener('touchmove', handleTouchMove, { passive: true });
+    window.addEventListener('touchend', handleTouchEnd, { passive: true });
+    window.addEventListener('wheel', handleWheel, { passive: true });
+
+    // Also attach directly to the main scroll container
+    const mainEl = document.getElementById('app-main-content') || document.querySelector('main');
+    if (mainEl) {
+      mainEl.addEventListener('scroll', handleScroll, { passive: true });
+      mainEl.addEventListener('touchstart', handleTouchStart, { passive: true });
+      mainEl.addEventListener('touchmove', handleTouchMove, { passive: true });
+      mainEl.addEventListener('touchend', handleTouchEnd, { passive: true });
+    }
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll, { capture: true });
+      window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
+      window.removeEventListener('wheel', handleWheel);
+      if (mainEl) {
+        mainEl.removeEventListener('scroll', handleScroll);
+        mainEl.removeEventListener('touchstart', handleTouchStart);
+        mainEl.removeEventListener('touchmove', handleTouchMove);
+        mainEl.removeEventListener('touchend', handleTouchEnd);
+      }
+    };
+  }, [showSearchInput, isMenuOpen]);
+
   return (
     <div
+      ref={containerRef}
       id="library-main-container"
       className="relative min-h-screen pb-32 select-none font-sans overflow-x-hidden transition-colors duration-300"
       style={{
@@ -272,7 +403,11 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       {/* ========================================================================= */}
       <div
         id="library-upper-section"
-        className="sticky top-0 z-40 border-b backdrop-blur-md shadow-md transition-colors duration-300"
+        className={`sticky top-0 z-40 border-b backdrop-blur-md shadow-md transition-all duration-200 ease-out will-change-transform ${
+          isHeaderVisible
+            ? 'translate-y-0 opacity-100'
+            : '-translate-y-full opacity-0 pointer-events-none'
+        }`}
         style={{
           backgroundColor: theme.headerBg,
           borderColor: theme.headerBorder,
@@ -285,6 +420,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             <button
               id="btn-library-back"
               onClick={() => {
+                setIsHeaderVisible(true);
                 if (isDrillDown) {
                   setSelectedArtist(null);
                   setSelectedAlbum(null);
@@ -309,12 +445,15 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             </h1>
           </div>
 
-          {/* Right Action Icons: Search & Three Dots Menu (NO Ads log/icon) */}
+          {/* Right Action Icons: Search & Three Dots Menu */}
           <div className="flex items-center gap-1 shrink-0">
             {/* Search Toggle */}
             <button
               id="btn-library-search-toggle"
-              onClick={() => setShowSearchInput(!showSearchInput)}
+              onClick={() => {
+                setShowSearchInput(!showSearchInput);
+                setIsHeaderVisible(true);
+              }}
               aria-label="Search Tracks"
               style={{ color: theme.textPrimary }}
               className="p-2 hover:opacity-80 active:scale-95 transition-transform cursor-pointer"

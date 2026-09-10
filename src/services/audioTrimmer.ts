@@ -1,6 +1,8 @@
+import { Capacitor } from '@capacitor/core';
 import { Track } from '../types';
-import { audioBufferToWav, downloadBlobToPhone } from './stemAudioConverter';
+import { audioBufferToWav, downloadBlobToPhone, saveAudioToDevice } from './stemAudioConverter';
 import { getAudioBlobOffline } from './storage';
+import { MusicLibrary } from '../plugins/MusicLibrary';
 
 export interface TrimResult {
   blob: Blob;
@@ -8,6 +10,125 @@ export interface TrimResult {
   duration: number;
   filename: string;
   trimmedTrack: Track;
+}
+
+/**
+ * Resolves a playable Web-compatible audio URL for any track,
+ * converting Android content:// and file paths to safe webview URLs or object URLs.
+ */
+export async function getTrackPlayableAudioUrl(track: Track): Promise<string> {
+  if (!track) return '';
+
+  // 1. Check if we already have an offline blob
+  try {
+    const offlineBlob = await getAudioBlobOffline(track.id);
+    if (offlineBlob) {
+      return URL.createObjectURL(offlineBlob);
+    }
+  } catch {}
+
+  // 2. Native Android resolution for content:// or local files
+  if (Capacitor.isNativePlatform() || (track.url && (track.url.startsWith('content://') || track.url.startsWith('file://')))) {
+    try {
+      let rawId: string | undefined = undefined;
+      if (track.id) {
+        const parts = track.id.split('-');
+        if (parts.length >= 2 && parts[0] === 'native') {
+          rawId = parts[1];
+        } else {
+          rawId = track.id;
+        }
+      }
+
+      const audioData = await MusicLibrary.readAudioData({
+        uri: track.url,
+        id: rawId,
+      });
+
+      if (audioData.filePath) {
+        return Capacitor.convertFileSrc(audioData.filePath);
+      } else if (audioData.base64) {
+        const binaryString = atob(audioData.base64);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: 'audio/mpeg' });
+        return URL.createObjectURL(blob);
+      }
+    } catch (err) {
+      console.warn('getTrackPlayableAudioUrl native read failed:', err);
+    }
+  }
+
+  // 3. Fallback to existing track URL
+  return track.url;
+}
+
+/**
+ * Loads real audio ArrayBuffer from offline storage, native bridge, or network.
+ */
+export async function fetchAudioBuffer(track: Track): Promise<ArrayBuffer | null> {
+  // 1. Try retrieving local offline blob first
+  try {
+    const offlineBlob = await getAudioBlobOffline(track.id);
+    if (offlineBlob) {
+      return await offlineBlob.arrayBuffer();
+    }
+  } catch {}
+
+  // 2. If running on native Android or track URL is content URI, read through native bridge
+  if (Capacitor.isNativePlatform() || (track.url && (track.url.startsWith('content://') || track.url.startsWith('file://')))) {
+    try {
+      let rawId: string | undefined = undefined;
+      if (track.id) {
+        const parts = track.id.split('-');
+        if (parts.length >= 2 && parts[0] === 'native') {
+          rawId = parts[1];
+        } else {
+          rawId = track.id;
+        }
+      }
+
+      const audioData = await MusicLibrary.readAudioData({
+        uri: track.url,
+        id: rawId,
+      });
+
+      if (audioData.base64) {
+        const binaryString = atob(audioData.base64);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        return bytes.buffer;
+      } else if (audioData.filePath) {
+        const fileSrc = Capacitor.convertFileSrc(audioData.filePath);
+        const resp = await fetch(fileSrc);
+        if (resp.ok) {
+          return await resp.arrayBuffer();
+        }
+      }
+    } catch (nativeErr) {
+      console.warn('Native readAudioData for trimming failed:', nativeErr);
+    }
+  }
+
+  // 3. If not resolved yet, fetch via network
+  if (track.url && !track.url.startsWith('content://')) {
+    try {
+      const response = await fetch(track.url);
+      if (response.ok) {
+        return await response.arrayBuffer();
+      }
+    } catch (err) {
+      console.warn('Direct fetch failed:', err);
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -28,29 +149,7 @@ export async function trimAudioTrack(
   const audioCtx = new AudioContextClass();
 
   try {
-    let arrayBuffer: ArrayBuffer | null = null;
-
-    // 1. Try retrieving local offline blob first
-    try {
-      const offlineBlob = await getAudioBlobOffline(track.id);
-      if (offlineBlob) {
-        arrayBuffer = await offlineBlob.arrayBuffer();
-      }
-    } catch {
-      // ignore
-    }
-
-    // 2. If not in offline blob storage, fetch via network
-    if (!arrayBuffer && track.url) {
-      try {
-        const response = await fetch(track.url);
-        if (response.ok) {
-          arrayBuffer = await response.arrayBuffer();
-        }
-      } catch (err) {
-        console.warn('Direct fetch failed, checking fallback synthesis:', err);
-      }
-    }
+    let arrayBuffer: ArrayBuffer | null = await fetchAudioBuffer(track);
 
     let inputBuffer: AudioBuffer;
 
@@ -155,4 +254,4 @@ export async function trimAudioTrack(
   }
 }
 
-export { downloadBlobToPhone };
+export { downloadBlobToPhone, saveAudioToDevice };

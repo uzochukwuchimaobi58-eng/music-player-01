@@ -4,6 +4,8 @@ import android.content.ContentUris
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
+import android.media.audiofx.BassBoost
+import android.media.audiofx.Equalizer
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -17,6 +19,7 @@ import java.io.File
  * - Safe asynchronous preparation (prepareAsync)
  * - Guarantees player.start() only executes inside setOnPreparedListener callback
  * - Emits periodic progress updates so playback timers never freeze at 0:00
+ * - Integrates hardware AudioEffects (Equalizer & BassBoost) for live Karaoke and Beat Instrumental
  */
 class PlaybackManager(private val context: Context) {
 
@@ -35,6 +38,23 @@ class PlaybackManager(private val context: Context) {
     private var isPrepared: Boolean = false
     private val handler = Handler(Looper.getMainLooper())
     private var progressRunnable: Runnable? = null
+
+    // Native Audio Effects for Karaoke & Beat Instrumental
+    private var equalizer: Equalizer? = null
+    private var bassBoost: BassBoost? = null
+
+    private var isKaraokeActive: Boolean = false
+    private var isStemMixActive: Boolean = false
+    private var vocalAttenuationPct: Int = 100
+    private var currentVocalLevel: Int = 100 // 0-100
+    private var currentBeatBoost: Int = 50   // 0-100
+    private var currentBassLevel: Int = 50   // 0-100
+    private var currentInstLevel: Int = 50   // 0-100
+
+    private var isEqEnabled: Boolean = false
+    private var eqBandsMap: Map<Int, Int> = emptyMap()
+    private var eqBassBoostPct: Int = 0
+    private var eqTrebleBoostPct: Int = 0
 
     val nativeQueue = mutableListOf<NativeQueueTrack>()
     var currentQueueIndex: Int = -1
@@ -77,6 +97,7 @@ class PlaybackManager(private val context: Context) {
         isPrepared = false
 
         // Clean up any existing playback instance safely
+        releaseAudioEffects()
         mediaPlayer?.let {
             try {
                 if (it.isPlaying) {
@@ -132,6 +153,7 @@ class PlaybackManager(private val context: Context) {
                 setOnPreparedListener { mp ->
                     isPrepared = true
                     try {
+                        setupAudioEffects(mp.audioSessionId)
                         mp.start()
                         onStateChangeCallback?.invoke(true)
                         onPreparedCallback?.invoke(mp.duration, mp.currentPosition)
@@ -223,6 +245,7 @@ class PlaybackManager(private val context: Context) {
 
     fun release() {
         stopProgressUpdates()
+        releaseAudioEffects()
         try {
             mediaPlayer?.apply {
                 if (isPlaying) {
@@ -234,6 +257,150 @@ class PlaybackManager(private val context: Context) {
         } catch (_: Exception) {}
         mediaPlayer = null
         isPrepared = false
+    }
+
+    private fun setupAudioEffects(sessionId: Int) {
+        try {
+            releaseAudioEffects()
+            equalizer = Equalizer(0, sessionId).apply {
+                enabled = true
+            }
+            bassBoost = BassBoost(0, sessionId).apply {
+                enabled = true
+            }
+            applyAudioEffects()
+        } catch (e: Exception) {
+            android.util.Log.w("PlaybackManager", "setupAudioEffects on session $sessionId failed, trying fallback to session 0: $e")
+            try {
+                equalizer = Equalizer(0, 0).apply { enabled = true }
+                bassBoost = BassBoost(0, 0).apply { enabled = true }
+                applyAudioEffects()
+            } catch (e2: Exception) {
+                android.util.Log.e("PlaybackManager", "Fallback AudioEffects failed: $e2")
+            }
+        }
+    }
+
+    private fun releaseAudioEffects() {
+        try {
+            equalizer?.release()
+        } catch (_: Exception) {}
+        equalizer = null
+
+        try {
+            bassBoost?.release()
+        } catch (_: Exception) {}
+        bassBoost = null
+    }
+
+    fun applyAudioEffects() {
+        val eq = equalizer ?: return
+        try {
+            val range = eq.bandLevelRange
+            val minLevel = range[0].toInt()
+            val maxLevel = range[1].toInt()
+            val numBands = eq.numberOfBands.toInt()
+
+            // 1. If custom stem mix or karaoke mode is explicitly active
+            if (isKaraokeActive || isStemMixActive) {
+                if (!eq.enabled) eq.enabled = true
+                val cutFactor = if (isKaraokeActive) {
+                    (vocalAttenuationPct / 100.0).coerceIn(0.0, 1.0)
+                } else {
+                    ((100 - currentVocalLevel) / 100.0).coerceIn(0.0, 1.0)
+                }
+
+                for (b in 0 until numBands) {
+                    val centerFreqHz = eq.getCenterFreq(b.toShort()) / 1000
+                    if (centerFreqHz in 400..4500) {
+                        // Mid/speech band: attenuate center vocal frequencies
+                        val cut = (minLevel * cutFactor * 0.95).toInt().coerceIn(minLevel, maxLevel)
+                        eq.setBandLevel(b.toShort(), cut.toShort())
+                    } else if (centerFreqHz < 300) {
+                        // Bass band
+                        val bassFactor = ((currentBassLevel - 50) / 50.0).coerceIn(-1.0, 1.0)
+                        val bassVal = (maxLevel * bassFactor * 0.7).toInt().coerceIn(minLevel, maxLevel)
+                        eq.setBandLevel(b.toShort(), bassVal.toShort())
+                    } else {
+                        eq.setBandLevel(b.toShort(), 0)
+                    }
+                }
+
+                bassBoost?.let { bb ->
+                    if (!bb.enabled) bb.enabled = true
+                    val strength = ((currentBeatBoost.coerceIn(0, 100) / 100.0) * 1000).toInt().toShort()
+                    bb.setStrength(strength)
+                }
+                return
+            }
+
+            // 2. Custom Equalizer Settings if user enabled Equalizer Modal
+            if (isEqEnabled && eqBandsMap.isNotEmpty()) {
+                if (!eq.enabled) eq.enabled = true
+                for (b in 0 until numBands) {
+                    val centerFreqHz = eq.getCenterFreq(b.toShort()) / 1000
+                    var closestFreq = 1000
+                    var minDiff = Int.MAX_VALUE
+                    for (targetFreq in eqBandsMap.keys) {
+                        val diff = Math.abs(targetFreq - centerFreqHz)
+                        if (diff < minDiff) {
+                            minDiff = diff
+                            closestFreq = targetFreq
+                        }
+                    }
+                    val dbGain = eqBandsMap[closestFreq] ?: 0
+                    val mbGain = (dbGain * 100).coerceIn(minLevel, maxLevel)
+                    eq.setBandLevel(b.toShort(), mbGain.toShort())
+                }
+
+                bassBoost?.let { bb ->
+                    val hasBass = eqBassBoostPct > 0
+                    if (bb.enabled != hasBass) bb.enabled = hasBass
+                    if (hasBass) {
+                        val strength = ((eqBassBoostPct.coerceIn(0, 100) / 100.0) * 1000).toInt().toShort()
+                        bb.setStrength(strength)
+                    } else {
+                        bb.setStrength(0)
+                    }
+                }
+                return
+            }
+
+            // 3. Normal / Flat / Disabled: reset bands and disable effect to save battery and preserve natural sound
+            for (b in 0 until numBands) {
+                eq.setBandLevel(b.toShort(), 0)
+            }
+            if (eq.enabled) eq.enabled = false
+            bassBoost?.let { bb ->
+                bb.setStrength(0)
+                if (bb.enabled) bb.enabled = false
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("PlaybackManager", "Error applying audio effects: $e")
+        }
+    }
+
+    fun setKaraokeMode(enabled: Boolean, attenuationPercent: Int = 100) {
+        isKaraokeActive = enabled
+        vocalAttenuationPct = attenuationPercent
+        applyAudioEffects()
+    }
+
+    fun setStemMix(vocalLevel: Int, beatBoost: Int, bassLevel: Int, instrumentalLevel: Int) {
+        currentVocalLevel = vocalLevel
+        currentBeatBoost = beatBoost
+        currentBassLevel = bassLevel
+        currentInstLevel = instrumentalLevel
+        isStemMixActive = (vocalLevel != 100 || beatBoost != 50 || bassLevel != 50 || instrumentalLevel != 50)
+        applyAudioEffects()
+    }
+
+    fun applyEqualizer(enabled: Boolean, bands: Map<Int, Int>, bassBoostPct: Int, trebleBoostPct: Int) {
+        isEqEnabled = enabled
+        eqBandsMap = bands
+        eqBassBoostPct = bassBoostPct
+        eqTrebleBoostPct = trebleBoostPct
+        applyAudioEffects()
     }
 
     private fun startProgressUpdates() {

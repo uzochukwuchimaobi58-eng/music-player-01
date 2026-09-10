@@ -531,6 +531,15 @@ class AudioEngineService {
   // --- AI Karaoke & Vocal Attenuator ---
   public toggleKaraokeMode(enabled: boolean, vocalAttenuationPercent: number = 100) {
     this.isKaraokeMode = enabled;
+
+    if (Capacitor.isNativePlatform() || this.isNative) {
+      try {
+        MusicLibrary.setKaraokeMode({ enabled, vocalAttenuationPercent });
+      } catch (err) {
+        console.warn('Native setKaraokeMode error:', err);
+      }
+    }
+
     if (!this.audioCtx) return;
 
     const attFactor = enabled ? (vocalAttenuationPercent / 100) : 0;
@@ -547,6 +556,14 @@ class AudioEngineService {
     bassLevel: number;
     instrumentalLevel: number;
   }) {
+    if (Capacitor.isNativePlatform() || this.isNative) {
+      try {
+        MusicLibrary.setStemMix(settings);
+      } catch (err) {
+        console.warn('Native setStemMix error:', err);
+      }
+    }
+
     if (!this.audioCtx) return;
 
     const vocalCut = (100 - settings.vocalLevel) / 100;
@@ -567,6 +584,19 @@ class AudioEngineService {
   }
 
   public resetStemMix() {
+    if (Capacitor.isNativePlatform() || this.isNative) {
+      try {
+        MusicLibrary.setStemMix({
+          vocalLevel: 100,
+          beatBoost: 50,
+          bassLevel: 50,
+          instrumentalLevel: 50,
+        });
+      } catch (err) {
+        console.warn('Native resetStemMix error:', err);
+      }
+    }
+
     if (!this.audioCtx) return;
     EQ_FREQUENCIES.forEach((freq) => {
       const f = this.eqFilters[freq];
@@ -581,6 +611,19 @@ class AudioEngineService {
   }
 
   public applyEqualizer(settings: EqualizerSettings) {
+    if (Capacitor.isNativePlatform() || this.isNative) {
+      try {
+        MusicLibrary.applyEqualizer({
+          enabled: settings.enabled,
+          bands: settings.bands,
+          bassBoost: settings.bassBoost,
+          trebleBoost: settings.trebleBoost,
+        });
+      } catch (err) {
+        console.warn('Native applyEqualizer error:', err);
+      }
+    }
+
     if (!this.audioCtx) return;
 
     // Calculate maximum boost to adjust preamp headroom dynamically (prevents clipping/cracking)

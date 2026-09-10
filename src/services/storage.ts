@@ -12,6 +12,7 @@ const STORAGE_KEYS = {
   LAST_TRACK: 'music_player_last_track',
   RECENT_PLAYED: 'music_player_recent_played',
   OFFLINE_BLOB_PREFIX: 'offline_track_blob_',
+  INITIAL_SCAN_COMPLETED: 'music_player_initial_scan_done',
 };
 
 export const DEFAULT_PLAYER_SETTINGS: PlayerSettings = {
@@ -200,3 +201,20 @@ export const getAudioBlobOffline = async (trackId: string): Promise<Blob | undef
 export const removeAudioBlobOffline = async (trackId: string): Promise<void> => {
   await del(`${STORAGE_KEYS.OFFLINE_BLOB_PREFIX}${trackId}`);
 };
+
+export const hasInitialScanCompleted = (): boolean => {
+  try {
+    return localStorage.getItem(STORAGE_KEYS.INITIAL_SCAN_COMPLETED) === 'true';
+  } catch {
+    return false;
+  }
+};
+
+export const setInitialScanCompleted = (completed: boolean = true): void => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.INITIAL_SCAN_COMPLETED, completed ? 'true' : 'false');
+  } catch (err) {
+    console.error('Failed to save initial scan status', err);
+  }
+};
+

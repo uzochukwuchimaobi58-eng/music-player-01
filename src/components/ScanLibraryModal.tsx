@@ -21,7 +21,9 @@ import {
   scanPhoneMusicDirectory,
   scanAudioFiles,
   isFileSystemAccessSupported,
+  convertNativeSongToTrack,
 } from '../services/deviceScanner';
+import { setInitialScanCompleted } from '../services/storage';
 
 interface ScanLibraryModalProps {
   isOpen: boolean;
@@ -79,27 +81,14 @@ export const ScanLibraryModal: React.FC<ScanLibraryModalProps> = ({
         setNoMusicFound(false);
 
         // Convert Native Song[] to Track[] for library state, preserving extracted artwork
-        const convertedTracks: Track[] = result.songs.map((s, idx) => ({
-          id: `native-${s.id || idx}-${Date.now()}`,
-          title: s.title,
-          artist: s.artist,
-          album: s.album,
-          duration: Math.max(1, Math.round((s.duration || 0) / 1000)),
-          url: s.uri,
-          coverArt: s.artwork || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&q=80',
-          folder: s.album || 'Phone Music',
-          isFavorite: false,
-          playCount: 0,
-          dateAdded: Date.now(),
-          isOffline: true,
-          sourceType: 'user-upload',
-        }));
+        const convertedTracks: Track[] = result.songs.map(convertNativeSongToTrack);
 
         const uniqueNewTracks = convertedTracks.filter(
           (nt) => !existingTracks.some((et) => et.title === nt.title && et.artist === nt.artist)
         );
 
         onAddTracks(uniqueNewTracks.length > 0 ? uniqueNewTracks : convertedTracks);
+        setInitialScanCompleted(true);
         setStatusMessage(`Successfully discovered ${result.songs.length} songs from device storage!`);
       } else {
         // Fallback check for web/desktop environment if native plugin returned 0 songs

@@ -24,6 +24,7 @@ import { getThemeConfig } from '../data/themes';
 import { audioEngine } from '../services/audioEngine';
 import {
   convertAndExportTrack,
+  saveAudioToDevice,
   downloadBlobToPhone,
   ConvertedStemResult
 } from '../services/stemAudioConverter';
@@ -216,11 +217,17 @@ export const KaraokeStudioModal: React.FC<KaraokeStudioModalProps> = ({
     }
   };
 
-  const handleSaveToPhone = () => {
+  const handleSaveToPhone = async () => {
     if (!convertedResult) return;
 
-    // Trigger direct native file download into phone's download folder
-    downloadBlobToPhone(convertedResult.blob, convertedResult.filename);
+    setFeedbackMsg(`Saving "${convertedResult.filename}" to phone...`);
+
+    // Save directly to phone storage (via native MediaStore on Android) or browser download on web
+    await saveAudioToDevice(convertedResult.blob, convertedResult.filename, {
+      title: convertedResult.convertedTrack.title,
+      artist: convertedResult.convertedTrack.artist,
+      duration: convertedResult.duration,
+    });
 
     // Also automatically add to music library
     if (onAddTrackToLibrary) {

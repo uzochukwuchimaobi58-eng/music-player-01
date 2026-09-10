@@ -7,6 +7,9 @@ export interface Song {
   uri: string;
   albumId: string;
   artwork?: string | null;
+  dateAdded?: number; // timestamp in milliseconds
+  folder?: string;
+  fileSize?: number;
 }
 
 export interface ScanResult {

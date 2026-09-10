@@ -1,5 +1,7 @@
 import { get, set } from 'idb-keyval';
-import { Track } from '../types';
+import { Capacitor } from '@capacitor/core';
+import { Track, Song } from '../types';
+import { MusicLibrary } from '../plugins/MusicLibrary';
 import { parseAudioMetadata } from './metadataParser';
 import { storeAudioBlobOffline, getAudioBlobOffline } from './storage';
 
@@ -72,6 +74,12 @@ export async function checkForNewDownloads(
   onProgress?: ScanProgressCallback
 ): Promise<Track[]> {
   try {
+    // 1. If running as native Android app, query MediaStore for newly downloaded/added songs
+    if (Capacitor.isNativePlatform()) {
+      return await checkForNewNativeSongs(existingTracks);
+    }
+
+    // 2. Otherwise (browser / web PWA), check connected file system directory handle
     const handle = await getSavedDirectoryHandle();
     if (!handle) return [];
 
@@ -410,3 +418,109 @@ export async function restoreTrackBlobUrls(tracks: Track[]): Promise<Track[]> {
 
   return updatedTracks;
 }
+
+/**
+ * Converts a native Android MediaStore Song to the application Track model.
+ * Uses a deterministic ID based on the MediaStore ID (e.g. `native-${s.id}`)
+ * so that tracks remain stable across app launches and scans.
+ */
+export function convertNativeSongToTrack(s: Song): Track {
+  const durationSec = Math.max(1, Math.round((s.duration || 0) / 1000));
+  const dateAddedMs = s.dateAdded && s.dateAdded > 0 ? s.dateAdded : Date.now();
+  const folderName = s.folder || s.album || 'Device Music';
+  const sizeStr = s.fileSize ? `${(s.fileSize / (1024 * 1024)).toFixed(1)} MB` : undefined;
+
+  return {
+    id: `native-${s.id}`,
+    title: s.title || 'Unknown Title',
+    artist: s.artist || 'Unknown Artist',
+    album: s.album || 'Unknown Album',
+    duration: durationSec,
+    url: s.uri,
+    coverArt: s.artwork || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&auto=format&fit=crop&q=80',
+    folder: folderName,
+    isFavorite: false,
+    playCount: 0,
+    dateAdded: dateAddedMs,
+    isOffline: true,
+    fileSize: sizeStr,
+    sourceType: 'user-upload',
+  };
+}
+
+/**
+ * Checks whether a given native MediaStore song already exists in the user's library.
+ */
+export function isSongAlreadyInLibrary(song: Song, existingTracks: Track[]): boolean {
+  const targetId = `native-${song.id}`;
+  const targetTitle = (song.title || '').trim().toLowerCase();
+  const targetArtist = (song.artist || '').trim().toLowerCase();
+
+  return existingTracks.some((t) => {
+    if (t.id === targetId) return true;
+    if (t.url && song.uri && t.url === song.uri) return true;
+    if (
+      t.title.trim().toLowerCase() === targetTitle &&
+      t.artist.trim().toLowerCase() === targetArtist
+    ) {
+      return true;
+    }
+    return false;
+  });
+}
+
+/**
+ * Fast, silent native delta check: queries MediaStore in background for newly downloaded or added music.
+ * Returns only newly detected tracks with their dateAdded timestamp stamped to now
+ * so they instantly show at the top of "Recently Added".
+ */
+export async function checkForNewNativeSongs(existingTracks: Track[]): Promise<Track[]> {
+  if (!Capacitor.isNativePlatform()) {
+    return [];
+  }
+
+  try {
+    const perm = await MusicLibrary.checkAudioPermission();
+    if (!perm.granted) {
+      return [];
+    }
+
+    const result = await MusicLibrary.scanSongs();
+    if (!result || !result.songs || result.songs.length === 0) {
+      return [];
+    }
+
+    const newSongs = result.songs.filter(
+      (song) => !isSongAlreadyInLibrary(song, existingTracks)
+    );
+
+    if (newSongs.length === 0) {
+      return [];
+    }
+
+    // Convert each newly found song, stamping dateAdded = Date.now() so it shows at top of Recently Added
+    const newTracks: Track[] = newSongs.map((s) => {
+      const track = convertNativeSongToTrack(s);
+      track.dateAdded = Date.now();
+      return track;
+    });
+
+    return newTracks;
+  } catch (err) {
+    console.debug('Silent background delta scan error:', err);
+    return [];
+  }
+}
+
+/**
+ * Runs a complete initial native scan of all device music.
+ */
+export async function performInitialNativeScan(): Promise<Track[]> {
+  const result = await MusicLibrary.scanSongs();
+  if (!result || !result.songs || result.songs.length === 0) {
+    return [];
+  }
+
+  return result.songs.map(convertNativeSongToTrack);
+}
+

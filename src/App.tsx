@@ -27,12 +27,15 @@ import {
   loadTracksFromIDB,
   DEFAULT_EQ_SETTINGS,
   DEFAULT_PLAYER_SETTINGS,
+  hasInitialScanCompleted,
+  setInitialScanCompleted,
 } from './services/storage';
 import {
   restoreTrackBlobUrls,
   autoScanStoredDirectory,
   scanAudioFiles,
   checkForNewDownloads,
+  convertNativeSongToTrack,
 } from './services/deviceScanner';
 import { audioEngine, TrendingAudioEffect } from './services/audioEngine';
 import { getThemeConfig } from './data/themes';
@@ -63,6 +66,7 @@ import { HiddenFilesModal } from './components/HiddenFilesModal';
 import { TrackActionMenuModal } from './components/TrackActionMenuModal';
 import { ArtworkUploadModal } from './components/ArtworkUploadModal';
 import { DriveSafetyModal } from './components/DriveSafetyModal';
+import { SetRingtoneConfirmModal } from './components/SetRingtoneConfirmModal';
 import { AffiliateDealsModal } from './components/AffiliateDealsModal';
 import { LibraryView } from './components/LibraryView';
 import { WelcomeSplashScreen } from './components/WelcomeSplashScreen';
@@ -114,6 +118,7 @@ export default function App() {
   const [autoSyncToast, setAutoSyncToast] = useState<string | null>(null);
   const [actionMenuTrack, setActionMenuTrack] = useState<Track | null>(null);
   const [artworkModalTrack, setArtworkModalTrack] = useState<Track | null>(null);
+  const [ringtoneConfirmTrack, setRingtoneConfirmTrack] = useState<Track | null>(null);
   const [isDriveSafetyModalOpen, setIsDriveSafetyModalOpen] = useState(false);
 
   // --- Playback State & Trending FX ---
@@ -484,61 +489,130 @@ export default function App() {
     };
   }, [currentTrackId]);
 
-  // Restore persistent device audio blobs & auto-scan phone folders on startup via MusicLibrary.scanSongs()
+  // 0-Scan Startup & Initial Permission Flow:
+  // 1. If user previously completed initial scan, DO NOT re-scan! All music loads instantly from cache.
+  // 2. On first install, when user grants audio permission, scan immediately within 1s and save all songs.
+  // 3. Incrementally detect newly downloaded/added music without doing full re-scans.
   useEffect(() => {
+    let isMounted = true;
+
     const initDeviceSync = async () => {
       try {
+        // Restore cached audio blob URLs if any
         const restored = await restoreTrackBlobUrls(tracks);
-        setTracks(restored);
-
-        // Native Android MediaStore Music Scan
-        try {
-          const scanResult = await MusicLibrary.scanSongs();
-          if (scanResult && scanResult.songs && scanResult.songs.length > 0) {
-            const nativeTracks: Track[] = scanResult.songs.map((s, idx) => ({
-              id: `native-${s.id || idx}-${Date.now()}`,
-              title: s.title,
-              artist: s.artist,
-              album: s.album,
-              duration: Math.max(1, Math.round((s.duration || 0) / 1000)),
-              url: s.uri,
-              coverArt: s.artwork || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&q=80',
-              folder: s.album || 'Phone Music',
-              isFavorite: false,
-              playCount: 0,
-              dateAdded: Date.now(),
-              isOffline: true,
-              sourceType: 'user-upload',
-            }));
-
-            const sortedNative = sortTracksAlphabetical(nativeTracks);
-            setTracks(sortedNative);
-            saveStoredTracks(sortedNative);
-            setAutoSyncToast(`Loaded ${scanResult.songs.length} phone songs from MediaStore`);
-            setTimeout(() => setAutoSyncToast(null), 4000);
-            return;
-          }
-        } catch (nativeErr) {
-          console.debug('Native scanSongs info:', nativeErr);
+        if (isMounted) {
+          setTracks(restored);
         }
 
-        // Auto-scan saved phone storage folders in web preview / browser fallback
-        const autoScanned = await autoScanStoredDirectory();
-        if (autoScanned.length > 0) {
-          const sortedAuto = sortTracksAlphabetical(autoScanned);
-          setTracks(sortedAuto);
-          saveStoredTracks(sortedAuto);
-          setAutoSyncToast(`Auto-synced ${autoScanned.length} phone songs`);
-          setTimeout(() => setAutoSyncToast(null), 4000);
+        const scanDone = hasInitialScanCompleted();
+
+        // -------------------------------------------------------------
+        // SCENARIO 1: Subsequent launches / app refreshes / return to app
+        // Initial scan was already completed in a prior session.
+        // DO NOT START SCANNING AGAIN! (Zero-delay, instant music load)
+        // -------------------------------------------------------------
+        if (scanDone) {
+          // Perform a fast, silent background check only for newly added downloads
+          setTimeout(async () => {
+            if (!isMounted) return;
+            try {
+              const newTracks = await checkForNewDownloads(tracksRef.current);
+              if (newTracks.length > 0 && isMounted) {
+                setTracks((prev) => {
+                  const unique = newTracks.filter(
+                    (nt) => !prev.some((et) => et.id === nt.id || (et.title === nt.title && et.artist === nt.artist))
+                  );
+                  if (unique.length === 0) return prev;
+                  const updated = [...unique, ...prev];
+                  saveStoredTracks(updated);
+                  return updated;
+                });
+                setAutoSyncToast(
+                  newTracks.length === 1
+                    ? `⚡ Detected new download: "${newTracks[0].title}" added to Recently Added`
+                    : `⚡ Detected ${newTracks.length} new downloads added to Recently Added`
+                );
+                setTimeout(() => setAutoSyncToast(null), 4000);
+              }
+            } catch (deltaErr) {
+              console.debug('Silent delta check info:', deltaErr);
+            }
+          }, 800);
+
+          return;
+        }
+
+        // -------------------------------------------------------------
+        // SCENARIO 2: First-time install & launch (Initial Scan)
+        // When notification/permission dialog appears:
+        // "Allow Sonance Music to access audio files on this device"
+        // When user taps "Allow", scan starts immediately within 1 second!
+        // -------------------------------------------------------------
+        if (Capacitor.isNativePlatform()) {
+          try {
+            // Request Android audio permission dialog
+            const perm = await MusicLibrary.requestAudioPermission();
+
+            // Also prompt notification permission for audio controls notification in background
+            MusicLibrary.requestNotificationPermission().catch(() => {});
+
+            if (perm && perm.granted) {
+              // User pressed "Allow"! Start scanning immediately within a second
+              if (isMounted) {
+                setAutoSyncToast('🔍 Scanning your music collection...');
+              }
+
+              const scanResult = await MusicLibrary.scanSongs();
+              if (scanResult && scanResult.songs && scanResult.songs.length > 0) {
+                const nativeTracks: Track[] = scanResult.songs.map(convertNativeSongToTrack);
+                const sortedNative = sortTracksAlphabetical(nativeTracks);
+
+                if (isMounted) {
+                  setTracks(sortedNative);
+                  saveStoredTracks(sortedNative);
+                  setInitialScanCompleted(true);
+                  setAutoSyncToast(`🎉 Discovered & saved ${sortedNative.length} songs from your device!`);
+                  setTimeout(() => setAutoSyncToast(null), 5000);
+                }
+                return;
+              } else {
+                // Initial scan finished, no media files found
+                if (isMounted) {
+                  setInitialScanCompleted(true);
+                  setAutoSyncToast('Ready! No audio files found in device storage yet');
+                  setTimeout(() => setAutoSyncToast(null), 3000);
+                }
+              }
+            } else {
+              console.warn('Audio permission was not granted by user');
+            }
+          } catch (nativeErr) {
+            console.debug('Native initial permission & scan error:', nativeErr);
+          }
         } else {
-          setAutoSyncToast(`Phone storage connected (${restored.length} tracks indexed)`);
-          setTimeout(() => setAutoSyncToast(null), 3000);
+          // Web / desktop environment fallback
+          const autoScanned = await autoScanStoredDirectory();
+          if (autoScanned.length > 0) {
+            const sortedAuto = sortTracksAlphabetical(autoScanned);
+            if (isMounted) {
+              setTracks(sortedAuto);
+              saveStoredTracks(sortedAuto);
+              setInitialScanCompleted(true);
+              setAutoSyncToast(`Auto-synced ${autoScanned.length} phone songs`);
+              setTimeout(() => setAutoSyncToast(null), 4000);
+            }
+          }
         }
       } catch (err) {
         console.debug('Device sync info:', err);
       }
     };
+
     initDeviceSync();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Global drag-and-drop listener to auto-ingest audio files anywhere without clicking buttons
@@ -602,15 +676,18 @@ export default function App() {
         if (newTracks.length > 0) {
           setTracks((prev) => {
             const unique = newTracks.filter(
-              (nt) => !prev.some((et) => et.title === nt.title && et.artist === nt.artist)
+              (nt) => !prev.some((et) => et.id === nt.id || (et.title === nt.title && et.artist === nt.artist))
             );
-            return unique.length > 0 ? [...unique, ...prev] : prev;
+            if (unique.length === 0) return prev;
+            const updated = [...unique, ...prev];
+            saveStoredTracks(updated);
+            return updated;
           });
           const songName = newTracks[0].title || 'track';
           const msg =
             newTracks.length === 1
-              ? `⚡ Auto-detected new download: "${songName}" added to library!`
-              : `⚡ Auto-detected ${newTracks.length} new downloads added to library!`;
+              ? `⚡ Auto-detected new music: "${songName}" added to Recently Added!`
+              : `⚡ Auto-detected ${newTracks.length} new tracks added to Recently Added!`;
           setAutoSyncToast(msg);
           setTimeout(() => setAutoSyncToast(null), 5000);
         }
@@ -1388,7 +1465,7 @@ export default function App() {
           )}
 
           {/* Main Dynamic View Content */}
-          <main className="flex-1 overflow-y-auto">
+          <main id="app-main-content" className="flex-1 overflow-y-auto">
             {isInsideLibraryOrFolder ? (
               <LibraryView
                 tracks={tracks}
@@ -1821,8 +1898,7 @@ export default function App() {
               setIsPlaylistModalOpen(true);
             }}
             onOpenRingtone={(track) => {
-              setCurrentTrackId(track.id);
-              setIsRingtoneOpen(true);
+              setRingtoneConfirmTrack(track);
             }}
             onOpenTrim={(track) => {
               setCurrentTrackId(track.id);
@@ -1834,6 +1910,17 @@ export default function App() {
             onShare={handleShareTrack}
             onDelete={(track) => {
               handleDeleteTrack(track.id);
+            }}
+          />
+
+          {/* Set As Ringtone Direct Confirmation Dialog */}
+          <SetRingtoneConfirmModal
+            isOpen={!!ringtoneConfirmTrack}
+            onClose={() => setRingtoneConfirmTrack(null)}
+            track={ringtoneConfirmTrack}
+            onOpenTrimmer={(track) => {
+              setCurrentTrackId(track.id);
+              setIsRingtoneOpen(true);
             }}
           />
 

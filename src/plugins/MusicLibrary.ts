@@ -43,6 +43,9 @@ export interface NativeQueueItem {
 }
 
 export interface MusicLibraryPlugin {
+  checkAudioPermission(): Promise<{ granted: boolean }>;
+  requestAudioPermission(): Promise<{ granted: boolean }>;
+  requestNotificationPermission(): Promise<{ granted: boolean }>;
   scan(): Promise<ScanResult>;
   scanSongs(): Promise<ScanResult>;
   playTrack(options: {
@@ -89,6 +92,12 @@ export interface MusicLibraryPlugin {
   hideNotification(): Promise<void>;
   getPlaybackStatus(): Promise<{ isPlaying: boolean; currentPosition: number; duration: number }>;
   getArtwork?(options: { songId?: string; uri?: string; albumId?: string }): Promise<{ artwork: string | null }>;
+  setKaraokeMode(options: { enabled: boolean; vocalAttenuationPercent?: number }): Promise<void>;
+  setStemMix(options: { vocalLevel: number; beatBoost: number; bassLevel: number; instrumentalLevel: number }): Promise<void>;
+  applyEqualizer(options: { enabled: boolean; bands: { [freq: number]: number }; bassBoost?: number; trebleBoost?: number }): Promise<void>;
+  readAudioData(options: { uri?: string; id?: string }): Promise<{ filePath?: string; base64?: string; size?: number }>;
+  saveAudioFile(options: { filename: string; base64Data: string; title?: string; artist?: string; duration?: number; isRingtone?: boolean; setAsRingtone?: boolean }): Promise<{ success: boolean; uri?: string; filename?: string; ringtoneSet?: boolean }>;
+  setAsRingtone(options: { uri?: string; id?: string; title?: string }): Promise<{ success: boolean; uri?: string; title?: string; message?: string }>;
   addListener(
     eventName: 'playbackStateChange',
     listenerFunc: (state: PlaybackStateEvent) => void
@@ -116,6 +125,18 @@ export interface MusicLibraryPlugin {
 }
 
 export class MusicLibraryWeb extends WebPlugin implements MusicLibraryPlugin {
+  async checkAudioPermission(): Promise<{ granted: boolean }> {
+    return { granted: true };
+  }
+
+  async requestAudioPermission(): Promise<{ granted: boolean }> {
+    return { granted: true };
+  }
+
+  async requestNotificationPermission(): Promise<{ granted: boolean }> {
+    return { granted: true };
+  }
+
   async scan(): Promise<ScanResult> {
     console.info('MusicLibrary running on web. For native Android, queries MediaStore.Audio.Media via MusicLibraryPlugin.kt');
     return {
@@ -177,6 +198,24 @@ export class MusicLibraryWeb extends WebPlugin implements MusicLibraryPlugin {
 
   async getArtwork(_options: { songId?: string }): Promise<{ artwork: string | null }> {
     return { artwork: null };
+  }
+
+  async setKaraokeMode(_options: { enabled: boolean; vocalAttenuationPercent?: number }): Promise<void> {}
+
+  async setStemMix(_options: { vocalLevel: number; beatBoost: number; bassLevel: number; instrumentalLevel: number }): Promise<void> {}
+
+  async applyEqualizer(_options: { enabled: boolean; bands: { [freq: number]: number }; bassBoost?: number; trebleBoost?: number }): Promise<void> {}
+
+  async readAudioData(_options: { uri?: string; id?: string }): Promise<{ filePath?: string; base64?: string; size?: number }> {
+    return {};
+  }
+
+  async saveAudioFile(_options: { filename: string; base64Data: string; title?: string; artist?: string; duration?: number; isRingtone?: boolean; setAsRingtone?: boolean }): Promise<{ success: boolean; uri?: string; filename?: string; ringtoneSet?: boolean }> {
+    return { success: true, filename: _options.filename, ringtoneSet: _options.setAsRingtone };
+  }
+
+  async setAsRingtone(_options: { uri?: string; id?: string; title?: string }): Promise<{ success: boolean; uri?: string; title?: string; message?: string }> {
+    return { success: true, title: _options.title, message: `Set "${_options.title}" as ringtone.` };
   }
 }
 
