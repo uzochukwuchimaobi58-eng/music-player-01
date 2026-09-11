@@ -87,7 +87,7 @@ class MusicLibraryPlugin : Plugin() {
             onTrackAutoAdvancedCallback = { track, index ->
                 currentTitle = track.title
                 currentArtist = track.artist
-                currentAlbum = track.album
+                currentAlbum = track.album ?: "Music"
                 currentSongId = track.id.toLongOrNull() ?: 0L
                 currentCoverArt = track.coverArt
                 this@MusicLibraryPlugin.isFavorite = track.isFavorite
