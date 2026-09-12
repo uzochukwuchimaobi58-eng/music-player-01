@@ -34,6 +34,7 @@ class AudioEngineService {
   private trackAutoAdvancedListeners: Set<(event: { id: string; index: number; title: string; artist: string }) => void> = new Set();
   private lastCurrentTime: number = 0;
   private lastDuration: number = 0;
+  private currentPlaybackRate: number = 1.0;
 
   // Safe parameter ramping to completely eliminate audio clicks/crackles
   private rampParam(param: AudioParam | null | undefined, target: number, duration: number = 0.04) {
@@ -302,8 +303,8 @@ class AudioEngineService {
         }
       }
 
-      // Format queue items for native Android service
-      const nativeQueue = options?.queue?.map((t) => {
+      // Format queue items for native Android service - strip heavy artwork so IPC transfer is instant
+      const nativeQueue = options?.queue?.slice(0, 150).map((t) => {
         let itemRawId: string | undefined = undefined;
         if (t.id) {
           const parts = t.id.split('-');
@@ -319,7 +320,7 @@ class AudioEngineService {
           title: t.title,
           artist: t.artist,
           album: t.album,
-          coverArt: t.coverArt,
+          coverArt: undefined, // Strip heavy base64 strings so bridge message is under 2KB
           duration: t.duration ? Math.round(t.duration * 1000) : 0,
           isFavorite: t.isFavorite,
         };
@@ -468,59 +469,123 @@ class AudioEngineService {
   }
 
   public setPlaybackRate(rate: number) {
+    const clamped = Math.max(0.25, Math.min(2.5, rate));
+    this.currentPlaybackRate = clamped;
+
     if (this.audioElement) {
-      this.audioElement.playbackRate = rate;
-      (this.audioElement as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = (this.activeEffect !== 'nightcore');
+      try {
+        this.audioElement.playbackRate = clamped;
+        (this.audioElement as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = (this.activeEffect !== 'nightcore');
+      } catch (e) {
+        console.warn('Error setting audioElement playbackRate:', e);
+      }
+    }
+
+    if (this.isNative || Capacitor.isNativePlatform()) {
+      try {
+        MusicLibrary.setPlaybackRate({ rate: clamped });
+      } catch (e) {
+        console.warn('Native setPlaybackRate error:', e);
+      }
     }
   }
 
-  // --- Trending Audio FX (Sped Up, Slowed+Reverb, Nightcore, Lo-Fi Tape, Bass Drop) ---
+  // --- Trending Audio FX (Sped Up, Slowed+Reverb, Nightcore, Lo-Fi Tape, Bass Drop, Normal) ---
   public applyTrendingEffect(effect: TrendingAudioEffect) {
     this.activeEffect = effect;
-    if (!this.audioCtx) return;
+
+    // Ensure audio context is ready on web
+    if (!this.audioCtx && !this.isNative) {
+      this.init();
+    }
+    if (this.audioCtx && this.audioCtx.state === 'suspended') {
+      this.audioCtx.resume().catch(() => {});
+    }
+
+    let targetRate = 1.0;
+    let bassGain = 0;
+    let trebleGain = 0;
+    let preservesPitch = true;
 
     switch (effect) {
       case 'sped_up':
-        this.setPlaybackRate(1.25);
-        this.rampParam(this.bassFilter?.gain, 2, 0.05);
-        this.rampParam(this.trebleFilter?.gain, 1, 0.05);
+        targetRate = 1.25;
+        bassGain = 2;
+        trebleGain = 1;
+        preservesPitch = true;
         break;
 
       case 'slowed_reverb':
-        this.setPlaybackRate(0.85);
-        this.rampParam(this.bassFilter?.gain, 4, 0.05);
-        this.rampParam(this.trebleFilter?.gain, -3, 0.05);
+        targetRate = 0.85;
+        bassGain = 4;
+        trebleGain = -3;
+        preservesPitch = true;
         break;
 
       case 'nightcore':
-        this.setPlaybackRate(1.35);
-        if (this.audioElement) {
-          (this.audioElement as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = false;
-        }
-        this.rampParam(this.trebleFilter?.gain, 3, 0.05);
+        targetRate = 1.35;
+        bassGain = -2;
+        trebleGain = 4;
+        preservesPitch = false;
         break;
 
       case 'bass_drop':
-        this.setPlaybackRate(1.0);
-        this.rampParam(this.bassFilter?.gain, 6, 0.05);
-        this.rampParam(this.trebleFilter?.gain, 1, 0.05);
+        targetRate = 1.0;
+        bassGain = 10;
+        trebleGain = 1;
+        preservesPitch = true;
         break;
 
       case 'lofi_tape':
-        this.setPlaybackRate(0.92);
-        this.rampParam(this.bassFilter?.gain, 3, 0.05);
-        this.rampParam(this.trebleFilter?.gain, -5, 0.05);
+        targetRate = 0.92;
+        bassGain = 4;
+        trebleGain = -6;
+        preservesPitch = true;
         break;
 
       case 'normal':
       default:
-        this.setPlaybackRate(1.0);
-        if (this.audioElement) {
-          (this.audioElement as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = true;
-        }
-        this.rampParam(this.bassFilter?.gain, 0, 0.05);
-        this.rampParam(this.trebleFilter?.gain, 0, 0.05);
+        targetRate = 1.0;
+        bassGain = 0;
+        trebleGain = 0;
+        preservesPitch = true;
         break;
+    }
+
+    // Immediately update playback speed for currently playing track
+    this.setPlaybackRate(targetRate);
+
+    if (this.audioElement) {
+      try {
+        (this.audioElement as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = preservesPitch;
+      } catch {}
+    }
+
+    // Apply hardware / WebAudio filter curves
+    if (this.audioCtx) {
+      this.rampParam(this.bassFilter?.gain, bassGain, 0.05);
+      this.rampParam(this.trebleFilter?.gain, trebleGain, 0.05);
+    }
+
+    // Apply native audio effect adjustments on Android
+    if (this.isNative || Capacitor.isNativePlatform()) {
+      try {
+        if (effect === 'bass_drop') {
+          MusicLibrary.applyEqualizer({
+            enabled: true,
+            bands: { 60: 8, 170: 4, 310: 1 },
+            bassBoost: 1000,
+          });
+        } else if (effect === 'normal') {
+          MusicLibrary.applyEqualizer({
+            enabled: false,
+            bands: {},
+            bassBoost: 0,
+          });
+        }
+      } catch (e) {
+        console.warn('Native applyTrendingEffect error:', e);
+      }
     }
   }
 
@@ -687,13 +752,56 @@ class AudioEngineService {
     }
   }
 
-  public getFrequencyData(array: Uint8Array) {
-    if (this.analyser) {
+  public getFrequencyData(array: Uint8Array, isPlayingFallback: boolean = false) {
+    // 1. Try real Web Audio analyser if not running on native MediaPlayer
+    if (this.analyser && !this.isNative) {
       this.analyser.getByteFrequencyData(array);
-    } else {
-      for (let i = 0; i < array.length; i++) {
-        array[i] = Math.floor(Math.sin(Date.now() / 200 + i * 0.2) * 30 + 35);
+      let sum = 0;
+      const sampleLimit = Math.min(array.length, 32);
+      for (let i = 0; i < sampleLimit; i++) {
+        sum += array[i];
       }
+      if (sum > 0) return;
+    }
+
+    // 2. Fallback for Native Android playback (where Android MediaPlayer handles audio output)
+    if (!isPlayingFallback && !this.isNative) {
+      for (let i = 0; i < array.length; i++) {
+        array[i] = 0;
+      }
+      return;
+    }
+
+    // Generate responsive, organic music frequency spectrum for visualizer on Android
+    const t = performance.now() / 1000;
+    const beatPhase = (t * 2.08) % 1;
+    const kick = Math.max(0, 1 - beatPhase * 3.5); // Fast punch & decay (~125 BPM)
+    const snarePhase = ((t * 2.08) + 0.5) % 1;
+    const snare = Math.max(0, 1 - snarePhase * 4.0);
+
+    const len = array.length;
+    for (let i = 0; i < len; i++) {
+      const norm = i / len;
+      let val = 0;
+
+      if (norm < 0.22) {
+        // Lows (Sub-bass & kick drum)
+        const bassFalloff = Math.max(0.2, 1 - norm * 2.8);
+        val = 60 + (kick * 170 + Math.sin(t * 3.8) * 25) * bassFalloff;
+      } else if (norm < 0.6) {
+        // Mids (Vocals, acoustic presence & instruments)
+        const midOsc = Math.sin(t * 6.5 + i * 0.55) * 35;
+        val = 55 + midOsc + snare * 115 + kick * 35;
+      } else {
+        // Highs (Percussion, hi-hats, shimmer)
+        const highJitter = (Math.sin(t * 14.2 + i * 0.8) * 20) + (Math.sin(t * 22.1 + i * 1.5) * 15);
+        const highDecay = Math.max(0.15, 1 - (norm - 0.6) * 1.7);
+        val = (50 + highJitter + (kick * 40)) * highDecay;
+      }
+
+      // Live variance so bars pulse musically
+      const variance = ((i * 19 + Math.floor(t * 40)) % 15) - 7;
+      array[i] = Math.max(12, Math.min(255, Math.floor(val + variance)));
     }
   }
 

@@ -1,1 +1,16 @@
 @import "tailwindcss";
+
+* {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+html, body, #root, #sonance-app-root {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+button, [role="button"] {
+  touch-action: manipulation;
+  user-select: none;
+}

@@ -15,10 +15,23 @@ import {
   ListPlus,
   Smartphone,
   ChevronRight,
-  ArrowLeft
+  ArrowLeft,
+  Flame
 } from 'lucide-react';
 import { Track, Playlist, ActiveView } from '../types';
 import { compareMusicTitles, compareMusicArtists } from '../utils/trackSort';
+
+function formatTimeAgo(timestamp?: number): string {
+  if (!timestamp) return '';
+  const diffSec = Math.floor((Date.now() - timestamp) / 1000);
+  if (diffSec < 60) return 'Just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
 
 interface TrackListProps {
   view: ActiveView;
@@ -283,9 +296,27 @@ export const TrackList: React.FC<TrackListProps> = ({
       ) : sortedTracks.length === 0 ? (
         <div className="text-center py-16 px-4 rounded-2xl bg-zinc-950 border border-dashed border-zinc-800">
           <FolderIcon className="w-12 h-12 text-zinc-600 mx-auto mb-3" />
-          <p className="text-sm font-semibold text-zinc-300">No tracks found</p>
-          <p className="text-xs text-zinc-500 mt-1">
-            Try adjusting your search filter or scan your local storage for songs.
+          <p className="text-sm font-semibold text-zinc-300">
+            {view === 'recent_play'
+              ? 'No Recently Played Music'
+              : view === 'most_play'
+              ? 'No Most Played Tracks'
+              : view === 'recent_add'
+              ? 'No Recently Added Tracks'
+              : view === 'favorite'
+              ? 'No Favorite Songs'
+              : 'No tracks found'}
+          </p>
+          <p className="text-xs text-zinc-500 mt-1 max-w-sm mx-auto">
+            {view === 'recent_play'
+              ? 'Play any song from your library and it will appear here in your listening history.'
+              : view === 'most_play'
+              ? 'Songs you play multiple times will be tracked and ranked here.'
+              : view === 'recent_add'
+              ? 'Songs downloaded or added to your device will appear here in chronological order.'
+              : view === 'favorite'
+              ? 'Tap the heart icon on any song to save it to your favorites.'
+              : 'Try adjusting your search filter or scan your device storage for music.'}
           </p>
         </div>
       ) : (
@@ -306,7 +337,7 @@ export const TrackList: React.FC<TrackListProps> = ({
               >
                 {/* Left: Index / Cover / Info */}
                 <div
-                  className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer"
+                  className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer touch-manipulation select-none active:opacity-75"
                   onClick={() => onPlayTrack(track, sortedTracks)}
                 >
                   {/* Track Artwork / Play indicator */}
@@ -362,6 +393,23 @@ export const TrackList: React.FC<TrackListProps> = ({
 
                     <div className="flex items-center gap-2 text-xs text-zinc-400 truncate mt-0.5">
                       <span className="truncate">{track.artist}</span>
+                      {track.playCount && track.playCount > 0 ? (
+                        <>
+                          <span className="text-zinc-600">·</span>
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-medium bg-amber-500/15 text-amber-400 border border-amber-500/25 shrink-0">
+                            <Flame className="w-2.5 h-2.5 fill-amber-400" />
+                            {track.playCount} {track.playCount === 1 ? 'play' : 'plays'}
+                          </span>
+                        </>
+                      ) : null}
+                      {view === 'recent_play' && track.lastPlayed ? (
+                        <>
+                          <span className="text-zinc-600">·</span>
+                          <span className="text-[10px] text-zinc-400 shrink-0">
+                            {formatTimeAgo(track.lastPlayed)}
+                          </span>
+                        </>
+                      ) : null}
                       <span className="text-zinc-600">·</span>
                       <span className="truncate text-zinc-500 hidden sm:inline">{track.folder}</span>
                     </div>

@@ -67,11 +67,29 @@ class MusicPlaybackService : Service() {
         if (intent != null) {
             when (intent.action) {
                 ACTION_PREVIOUS -> onMediaAction("previous", 0)
-                ACTION_PLAY -> onMediaAction("play", 0)
-                ACTION_PAUSE -> onMediaAction("pause", 0)
-                ACTION_TOGGLE -> onMediaAction(if (isPlaying) "pause" else "play", 0)
+                ACTION_PLAY -> {
+                    isPlaying = true
+                    updatePlaybackState()
+                    updateNotification()
+                    onMediaAction("play", 0)
+                }
+                ACTION_PAUSE -> {
+                    isPlaying = false
+                    updatePlaybackState()
+                    updateNotification()
+                    onMediaAction("pause", 0)
+                }
+                ACTION_TOGGLE -> {
+                    val nextPlay = !isPlaying
+                    isPlaying = nextPlay
+                    updatePlaybackState()
+                    updateNotification()
+                    onMediaAction(if (nextPlay) "play" else "pause", 0)
+                }
                 ACTION_NEXT -> onMediaAction("next", 0)
                 ACTION_CLOSE -> {
+                    isPlaying = false
+                    updatePlaybackState()
                     onMediaAction("close", 0)
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
@@ -117,10 +135,16 @@ class MusicPlaybackService : Service() {
         mediaSession = MediaSession(this, "SonanceMediaSession").apply {
             setCallback(object : MediaSession.Callback() {
                 override fun onPlay() {
+                    isPlaying = true
+                    updatePlaybackState()
+                    updateNotification()
                     onMediaAction("play", 0)
                 }
 
                 override fun onPause() {
+                    isPlaying = false
+                    updatePlaybackState()
+                    updateNotification()
                     onMediaAction("pause", 0)
                 }
 
@@ -133,10 +157,14 @@ class MusicPlaybackService : Service() {
                 }
 
                 override fun onSeekTo(pos: Long) {
+                    currentPositionMs = pos
+                    updatePlaybackState()
                     onMediaAction("seekTo", pos)
                 }
 
                 override fun onStop() {
+                    isPlaying = false
+                    updatePlaybackState()
                     onMediaAction("close", 0)
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()

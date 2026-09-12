@@ -22,6 +22,7 @@ import {
 import { Track, AppTheme } from '../types';
 import { getThemeConfig } from '../data/themes';
 import { audioEngine } from '../services/audioEngine';
+import { parseLrcLyrics } from '../services/lyricsScanner';
 import {
   convertAndExportTrack,
   saveAudioToDevice,
@@ -111,21 +112,9 @@ export const KaraokeStudioModal: React.FC<KaraokeStudioModalProps> = ({
   const activeTrack = tracks.find((t) => t.id === selectedTrackId) || currentTrack || tracks[0];
   const theme = getThemeConfig(currentTheme);
 
-  // Parse synchronized lyrics lines
+  // Parse synchronized lyrics lines using universal parseLrcLyrics
   const lyricsLines = activeTrack?.lyrics
-    ? activeTrack.lyrics
-        .split('\n')
-        .map((line) => {
-          const match = line.match(/\[(\d{2}):(\d{2})\.(\d{2})\](.*)/);
-          if (match) {
-            const min = parseInt(match[1], 10);
-            const sec = parseInt(match[2], 10);
-            const time = min * 60 + sec;
-            return { time, text: match[4].trim() };
-          }
-          return { time: 0, text: line.trim() };
-        })
-        .filter((l) => l.text.length > 0)
+    ? parseLrcLyrics(activeTrack.lyrics, activeTrack.duration || 180)
     : [
         { time: 0, text: '♪ Instrumental Intro ♪' },
         { time: 5, text: activeTrack?.title || 'Sing your favorite song' },

@@ -1,4 +1,5 @@
 import { get, set, del } from 'idb-keyval';
+import { Capacitor } from '@capacitor/core';
 import { Track, Playlist, EqualizerSettings, AppTheme, PlayerSettings } from '../types';
 import { INITIAL_TRACKS, INITIAL_PLAYLISTS, EQ_PRESET_MAP } from '../data/defaultTracks';
 
@@ -69,9 +70,15 @@ export const DEFAULT_EQ_SETTINGS: EqualizerSettings = {
 export const loadStoredTracks = (): Track[] => {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.TRACKS_METADATA);
-    if (!raw) return INITIAL_TRACKS;
+    if (!raw) {
+      if (Capacitor.isNativePlatform()) return [];
+      return INITIAL_TRACKS;
+    }
     const parsed: Track[] = JSON.parse(raw);
-    if (!parsed || parsed.length === 0) return INITIAL_TRACKS;
+    if (!parsed || parsed.length === 0) {
+      if (Capacitor.isNativePlatform()) return [];
+      return INITIAL_TRACKS;
+    }
 
     // Migrate any legacy broken URLs (e.g. 403 Pixabay links) to valid, working streams
     let hasMigrated = false;
@@ -89,11 +96,17 @@ export const loadStoredTracks = (): Track[] => {
     if (hasMigrated) {
       saveStoredTracks(sanitized);
     }
+
+    // On native platform (Play Store download), strictly return only real user device tracks
+    if (Capacitor.isNativePlatform()) {
+      return sanitized.filter((t) => t.sourceType !== 'built-in');
+    }
+
     // If owner tracks exist, stop at owner music library by excluding built-in demo tracks
     const ownerTracks = sanitized.filter((t) => t.sourceType !== 'built-in');
     return ownerTracks.length > 0 ? ownerTracks : sanitized;
   } catch {
-    return INITIAL_TRACKS;
+    return Capacitor.isNativePlatform() ? [] : INITIAL_TRACKS;
   }
 };
 
@@ -106,6 +119,9 @@ export const loadTracksFromIDB = async (): Promise<Track[] | null> => {
   try {
     const idbTracks = await get(TRACKS_IDB_KEY);
     if (Array.isArray(idbTracks) && idbTracks.length > 0) {
+      if (Capacitor.isNativePlatform()) {
+        return idbTracks.filter((t) => t.sourceType !== 'built-in');
+      }
       const ownerTracks = idbTracks.filter((t) => t.sourceType !== 'built-in');
       return ownerTracks.length > 0 ? ownerTracks : idbTracks;
     }
@@ -121,17 +137,44 @@ export const loadTracksFromIDB = async (): Promise<Track[] | null> => {
  * Prevents QuotaExceededError and app crashes when thousands of tracks/downloads are stored.
  */
 export const saveStoredTracks = (tracks: Track[]) => {
-  // 1. Primary storage: IndexedDB (handles tens of thousands of downloads without crashing)
+  // 1. Primary storage: IndexedDB (handles tens of thousands of downloads and full artwork safely)
   set(TRACKS_IDB_KEY, tracks).catch((err) => {
     console.error('Failed to save tracks to IndexedDB', err);
   });
 
-  // 2. Secondary lightweight cache: localStorage (capped to avoid QuotaExceededError crash)
+  // 2. Secondary lightweight synchronous cache: localStorage
+  // Sanitize out large base64 data strings so it NEVER triggers QuotaExceededError
   try {
-    const cacheSubset = tracks.length > 80 ? tracks.slice(0, 80) : tracks;
-    localStorage.setItem(STORAGE_KEYS.TRACKS_METADATA, JSON.stringify(cacheSubset));
+    const sanitizedCache = tracks.slice(0, 2000).map((t) => {
+      if (t.coverArt && t.coverArt.startsWith('data:') && t.coverArt.length > 300) {
+        return { ...t, coverArt: '' };
+      }
+      return t;
+    });
+    localStorage.setItem(STORAGE_KEYS.TRACKS_METADATA, JSON.stringify(sanitizedCache));
+    if (tracks.some((t) => t.sourceType !== 'built-in')) {
+      setInitialScanCompleted(true);
+    }
   } catch (err) {
-    console.warn('localStorage quota reached or unavailable; tracks safely preserved in IndexedDB', err);
+    console.warn('localStorage cache notice; tracks safely preserved in IndexedDB', err);
+  }
+};
+
+export const saveLastPlayedTrack = (trackId: string, positionSec: number = 0) => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.LAST_TRACK, JSON.stringify({ trackId, positionSec }));
+  } catch (err) {
+    console.error('Failed to save last track', err);
+  }
+};
+
+export const loadLastPlayedTrack = (): { trackId: string | null; positionSec: number } => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.LAST_TRACK);
+    if (!raw) return { trackId: null, positionSec: 0 };
+    return JSON.parse(raw);
+  } catch {
+    return { trackId: null, positionSec: 0 };
   }
 };
 

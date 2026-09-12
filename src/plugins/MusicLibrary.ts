@@ -90,9 +90,17 @@ export interface MusicLibraryPlugin {
     isFavorite?: boolean;
   }): Promise<void>;
   hideNotification(): Promise<void>;
-  getPlaybackStatus(): Promise<{ isPlaying: boolean; currentPosition: number; duration: number }>;
+  getPlaybackStatus(): Promise<{
+    isPlaying: boolean;
+    currentPosition: number;
+    duration: number;
+    currentSongId?: string;
+    currentTitle?: string;
+    currentArtist?: string;
+  }>;
   getArtwork?(options: { songId?: string; uri?: string; albumId?: string }): Promise<{ artwork: string | null }>;
   setKaraokeMode(options: { enabled: boolean; vocalAttenuationPercent?: number }): Promise<void>;
+  setPlaybackRate(options: { rate: number }): Promise<void>;
   setStemMix(options: { vocalLevel: number; beatBoost: number; bassLevel: number; instrumentalLevel: number }): Promise<void>;
   applyEqualizer(options: { enabled: boolean; bands: { [freq: number]: number }; bassBoost?: number; trebleBoost?: number }): Promise<void>;
   readAudioData(options: { uri?: string; id?: string }): Promise<{ filePath?: string; base64?: string; size?: number }>;
@@ -203,6 +211,8 @@ export class MusicLibraryWeb extends WebPlugin implements MusicLibraryPlugin {
   }
 
   async setKaraokeMode(_options: { enabled: boolean; vocalAttenuationPercent?: number }): Promise<void> {}
+
+  async setPlaybackRate(_options: { rate: number }): Promise<void> {}
 
   async setStemMix(_options: { vocalLevel: number; beatBoost: number; bassLevel: number; instrumentalLevel: number }): Promise<void> {}
 

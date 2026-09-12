@@ -58,6 +58,26 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({
   const [scanSuccess, setScanSuccess] = useState<string | null>(null);
   const [lyricsSourceLabel, setLyricsSourceLabel] = useState<string>('Live Synchronized');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const activeLineRef = useRef<HTMLParagraphElement | null>(null);
+
+  const rawLyrics = editedLyrics || track?.lyrics || '';
+  const parsedLines: ParsedLyricLine[] = parseLrcLyrics(rawLyrics, track?.duration || 180);
+
+  // Active line index based on playback currentTime
+  let currentLineIndex = -1;
+  for (let i = parsedLines.length - 1; i >= 0; i--) {
+    if (currentTime >= parsedLines[i].time) {
+      currentLineIndex = i;
+      break;
+    }
+  }
+
+  // Auto-scroll active line to center in full view mode
+  useEffect(() => {
+    if (viewMode === 'full' && activeLineRef.current) {
+      activeLineRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [currentLineIndex, viewMode]);
 
   // Auto-scan on modal open if track does not have lyrics
   useEffect(() => {
@@ -70,20 +90,6 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({
   }, [isOpen, track?.id]);
 
   if (!isOpen || !track) return null;
-
-  const rawLyrics = editedLyrics || track.lyrics || '';
-
-  // Parse lines with timestamps using the robust LRC parser
-  const parsedLines: ParsedLyricLine[] = parseLrcLyrics(rawLyrics, track.duration || 180);
-
-  // Active line index based on playback currentTime
-  let currentLineIndex = -1;
-  for (let i = parsedLines.length - 1; i >= 0; i--) {
-    if (currentTime >= parsedLines[i].time) {
-      currentLineIndex = i;
-      break;
-    }
-  }
 
   const handleStartEdit = () => {
     setEditedLyrics(rawLyrics);
@@ -367,6 +373,7 @@ export const LyricsModal: React.FC<LyricsModalProps> = ({
                 parsedLines.map((line, idx) => (
                   <p
                     key={idx}
+                    ref={idx === currentLineIndex ? activeLineRef : undefined}
                     onClick={() => onSeek && line.time > 0 && onSeek(line.time)}
                     className={`text-sm sm:text-base py-1 px-2 rounded-xl transition-all cursor-pointer ${
                       idx === currentLineIndex

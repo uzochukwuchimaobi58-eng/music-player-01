@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import confetti from 'canvas-confetti';
 import {
   Track,
@@ -29,6 +29,8 @@ import {
   DEFAULT_PLAYER_SETTINGS,
   hasInitialScanCompleted,
   setInitialScanCompleted,
+  saveLastPlayedTrack,
+  loadLastPlayedTrack,
 } from './services/storage';
 import {
   restoreTrackBlobUrls,
@@ -71,6 +73,7 @@ import { AffiliateDealsModal } from './components/AffiliateDealsModal';
 import { LibraryView } from './components/LibraryView';
 import { WelcomeSplashScreen } from './components/WelcomeSplashScreen';
 import { AffiliateProduct } from './types';
+import { autoScanTrackLyrics } from './services/lyricsScanner';
 import { loadAffiliateProducts } from './data/affiliateProducts';
 import { subscribeToCloudAffiliateProducts } from './services/affiliateService';
 import { sortTracksAlphabetical } from './utils/trackSort';
@@ -190,10 +193,17 @@ export default function App() {
 
   // --- Playback State & Trending FX ---
   const [currentTrackId, setCurrentTrackId] = useState<string | null>(() => {
+    const lastPlayed = loadLastPlayedTrack();
+    if (lastPlayed?.trackId && tracks.some((t) => t.id === lastPlayed.trackId)) {
+      return lastPlayed.trackId;
+    }
     return tracks.length > 0 ? tracks[0].id : null;
   });
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
+  const [currentTime, setCurrentTime] = useState(() => {
+    const lastPlayed = loadLastPlayedTrack();
+    return lastPlayed?.positionSec || 0;
+  });
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.85);
   const [isMuted, setIsMuted] = useState(false);
@@ -209,7 +219,17 @@ export default function App() {
   useEffect(() => {
     loadTracksFromIDB().then((idbTracks) => {
       if (idbTracks && idbTracks.length > 0) {
-        setTracks(sortTracksAlphabetical(idbTracks));
+        const sorted = sortTracksAlphabetical(idbTracks);
+        setTracks(sorted);
+        setInitialScanCompleted(true);
+        // If current track is default or not set, restore user's last played track
+        const lastPlayed = loadLastPlayedTrack();
+        if (lastPlayed?.trackId && sorted.some((t) => t.id === lastPlayed.trackId)) {
+          setCurrentTrackId(lastPlayed.trackId);
+          if (lastPlayed.positionSec) {
+            setCurrentTime(lastPlayed.positionSec);
+          }
+        }
       }
     });
   }, []);
@@ -502,7 +522,13 @@ export default function App() {
         mediaSub = await MusicLibrary.addListener('mediaAction', (event) => {
           switch (event.type) {
             case 'play':
+              setIsPlaying(true);
+              if (!Capacitor.isNativePlatform()) {
+                handleTogglePlayRef.current();
+              }
+              break;
             case 'pause':
+              setIsPlaying(false);
               if (!Capacitor.isNativePlatform()) {
                 handleTogglePlayRef.current();
               }
@@ -556,10 +582,63 @@ export default function App() {
     };
   }, [currentTrackId]);
 
+  // Sync with background playback and resume playing state when returning to the app
+  useEffect(() => {
+    const syncPlaybackState = async () => {
+      if (!Capacitor.isNativePlatform()) return;
+      try {
+        const status = await MusicLibrary.getPlaybackStatus();
+        if (status) {
+          if (status.isPlaying !== undefined) {
+            setIsPlaying(status.isPlaying);
+          }
+          if (status.currentPosition && status.currentPosition > 0) {
+            setCurrentTime(status.currentPosition / 1000);
+          }
+          if (status.duration && status.duration > 0) {
+            setDuration(status.duration / 1000);
+          }
+          if (status.currentSongId) {
+            const rawId = status.currentSongId;
+            const matched = tracksRef.current.find(
+              (t) => t.id === rawId || t.id === `native-${rawId}` || t.id.endsWith(rawId)
+            );
+            if (matched) {
+              setCurrentTrackId(matched.id);
+              saveLastPlayedTrack(matched.id, Math.round((status.currentPosition || 0) / 1000));
+            }
+          }
+        }
+      } catch (err) {
+        console.debug('Native status sync notice:', err);
+      }
+    };
+
+    syncPlaybackState();
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        syncPlaybackState();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, []);
+
+  // Continuously persist current track and playback position so returning to app restores previous song
+  useEffect(() => {
+    if (currentTrackId) {
+      saveLastPlayedTrack(currentTrackId, Math.round(currentTime));
+    }
+  }, [currentTrackId, Math.floor(currentTime / 5)]);
+
   // 0-Scan Startup & Initial Permission Flow:
-  // 1. If user previously completed initial scan, DO NOT re-scan! All music loads instantly from cache.
-  // 2. On first install, when user grants audio permission, scan immediately within 1s and save all songs.
-  // 3. Incrementally detect newly downloaded/added music without doing full re-scans.
+  // 1. If music is already saved inside the app or initial scan was completed, DO NOT re-scan!
+  // All music loads instantly from the persistent library.
+  // 2. On first install only, when user grants audio permission, scan once and save all songs.
+  // 3. Incrementally detect newly downloaded/added music in the background without scanning again.
   useEffect(() => {
     let isMounted = true;
 
@@ -571,12 +650,15 @@ export default function App() {
           setTracks(restored);
         }
 
-        const scanDone = hasInitialScanCompleted();
+        const scanDone =
+          hasInitialScanCompleted() ||
+          tracks.some((t) => t.sourceType !== 'built-in') ||
+          tracksRef.current.some((t) => t.sourceType !== 'built-in');
 
         // -------------------------------------------------------------
         // SCENARIO 1: Subsequent launches / app refreshes / return to app
-        // Initial scan was already completed in a prior session.
-        // DO NOT START SCANNING AGAIN! (Zero-delay, instant music load)
+        // Music is already saved inside the app!
+        // DO NOT START SCANNING AGAIN! (Instant music load, zero delay)
         // -------------------------------------------------------------
         if (scanDone) {
           // Perform a fast, silent background check only for newly added downloads
@@ -882,6 +964,31 @@ export default function App() {
     };
   }, [sleepTimerRemaining, volume]);
 
+  // Reliably count play instances and persist to storage for Most Played and Recently Played
+  const registerTrackPlay = useCallback((trackId: string) => {
+    setTracks((prev) => {
+      const now = Date.now();
+      let matched = false;
+      const updated = prev.map((t) => {
+        if (t.id === trackId || t.id === `native-${trackId}` || trackId.includes(t.id)) {
+          matched = true;
+          return {
+            ...t,
+            playCount: (t.playCount || 0) + 1,
+            lastPlayed: now,
+          };
+        }
+        return t;
+      });
+
+      if (matched) {
+        saveStoredTracks(updated);
+        return updated;
+      }
+      return prev;
+    });
+  }, []);
+
   // Load and play track with robust queue context and native synchronization
   const loadAndPlayTrack = async (
     track: Track,
@@ -899,19 +1006,10 @@ export default function App() {
 
     setActiveQueue(queueToUse);
     setCurrentTrackId(track.id);
-
-    // Update play stats
-    setTracks((prev) =>
-      prev.map((t) =>
-        t.id === track.id
-          ? {
-              ...t,
-              playCount: (t.playCount || 0) + 1,
-              lastPlayed: Date.now(),
-            }
-          : t
-      )
-    );
+    if (autoPlay) {
+      setIsPlaying(true);
+    }
+    saveLastPlayedTrack(track.id, 0);
 
     const currentIdx = queueToUse.findIndex((t) => t.id === track.id);
     const options = {
@@ -921,25 +1019,53 @@ export default function App() {
       isShuffle,
     };
 
-    try {
-      const cachedBlob = await getAudioBlobOffline(track.id);
-      if (cachedBlob) {
-        const localBlobUrl = URL.createObjectURL(cachedBlob);
-        await audioEngine.loadTrack(localBlobUrl, track, options);
-      } else {
+    const isNativeAudio = Capacitor.isNativePlatform() || track.url.startsWith('content://');
+    if (isNativeAudio) {
+      audioEngine.loadTrack(track.url, track, options).catch((err) => {
+        console.warn('Native track load error:', err);
+      });
+    } else {
+      try {
+        const cachedBlob = await getAudioBlobOffline(track.id);
+        if (cachedBlob) {
+          const localBlobUrl = URL.createObjectURL(cachedBlob);
+          await audioEngine.loadTrack(localBlobUrl, track, options);
+        } else {
+          await audioEngine.loadTrack(track.url, track, options);
+        }
+      } catch {
         await audioEngine.loadTrack(track.url, track, options);
       }
-    } catch {
-      await audioEngine.loadTrack(track.url, track, options);
+      if (autoPlay) {
+        try {
+          await audioEngine.play(playerSettings.playPauseFade);
+        } catch (err) {
+          console.warn('Play error:', err);
+        }
+      }
     }
 
-    if (autoPlay) {
-      try {
-        await audioEngine.play(playerSettings.playPauseFade);
-        setIsPlaying(true);
-      } catch (err) {
-        console.warn('Play error:', err);
-      }
+    // Update play stats and persist to storage
+    requestAnimationFrame(() => {
+      registerTrackPlay(track.id);
+    });
+
+    // Background auto-fetch synchronized lyrics if missing
+    if (!track.lyrics || track.lyrics.trim().length === 0) {
+      autoScanTrackLyrics(track)
+        .then((res) => {
+          if (res && res.lyrics && res.source !== 'audio_synced') {
+            setTracks((prev) => {
+              const updated = prev.map((t) => (t.id === track.id ? { ...t, lyrics: res.lyrics } : t));
+              saveStoredTracks(updated);
+              return updated;
+            });
+            setActiveQueue((prev) =>
+              prev.map((t) => (t.id === track.id ? { ...t, lyrics: res.lyrics } : t))
+            );
+          }
+        })
+        .catch(() => {});
     }
   };
 
@@ -1093,13 +1219,7 @@ export default function App() {
     if (foundTrack) {
       setCurrentTrackId(foundTrack.id);
       setIsPlaying(true);
-      setTracks((prev) =>
-        prev.map((t) =>
-          t.id === foundTrack.id
-            ? { ...t, playCount: (t.playCount || 0) + 1, lastPlayed: Date.now() }
-            : t
-        )
-      );
+      registerTrackPlay(foundTrack.id);
     }
   };
   handleNativeAutoAdvancedRef.current = handleNativeAutoAdvanced;
@@ -1143,9 +1263,11 @@ export default function App() {
   };
 
   const handleToggleFavorite = (trackId: string) => {
-    setTracks((prev) =>
-      prev.map((t) => (t.id === trackId ? { ...t, isFavorite: !t.isFavorite } : t))
-    );
+    setTracks((prev) => {
+      const updated = prev.map((t) => (t.id === trackId ? { ...t, isFavorite: !t.isFavorite } : t));
+      saveStoredTracks(updated);
+      return updated;
+    });
   };
   handleToggleFavoriteRef.current = handleToggleFavorite;
 
@@ -1271,13 +1393,16 @@ export default function App() {
     setTracks((prev) => {
       // Exclude demo/built-in tracks if real owner tracks are added
       const ownerPrev = prev.filter((t) => t.sourceType !== 'built-in');
-      const unique = newTracks.filter(
+      const stampedNewTracks = newTracks.map((t) => ({
+        ...t,
+        dateAdded: t.dateAdded && t.dateAdded > 0 ? t.dateAdded : Date.now(),
+      }));
+      const unique = stampedNewTracks.filter(
         (nt) => !ownerPrev.some((et) => et.title.toLowerCase() === nt.title.toLowerCase() && et.artist.toLowerCase() === nt.artist.toLowerCase())
       );
-      const combined = unique.length > 0 ? [...ownerPrev, ...unique] : (ownerPrev.length > 0 ? ownerPrev : newTracks);
-      const sorted = sortTracksAlphabetical(combined);
-      saveStoredTracks(sorted);
-      return sorted;
+      const combined = unique.length > 0 ? [...unique, ...ownerPrev] : (ownerPrev.length > 0 ? ownerPrev : stampedNewTracks);
+      saveStoredTracks(combined);
+      return combined;
     });
 
     confetti({
@@ -1361,13 +1486,21 @@ export default function App() {
   const handleSetTrendingEffect = (fx: TrendingAudioEffect) => {
     setActiveTrendingEffect(fx);
     audioEngine.applyTrendingEffect(fx);
-    if (fx === 'sped_up') setPlaybackRate(1.25);
-    else if (fx === 'slowed_reverb') setPlaybackRate(0.85);
-    else if (fx === 'nightcore') setPlaybackRate(1.35);
-    else if (fx === 'lofi_tape') setPlaybackRate(0.92);
-    else setPlaybackRate(1.0);
 
-    setAutoSyncToast(`Applied FX: ${fx.replace('_', ' ').toUpperCase()}`);
+    const speedMap: Record<TrendingAudioEffect, number> = {
+      normal: 1.0,
+      sped_up: 1.25,
+      slowed_reverb: 0.85,
+      nightcore: 1.35,
+      lofi_tape: 0.92,
+      bass_drop: 1.0,
+    };
+    const targetRate = speedMap[fx] || 1.0;
+    setPlaybackRate(targetRate);
+    audioEngine.setPlaybackRate(targetRate);
+
+    const label = fx === 'normal' ? 'Normal (Studio Mix)' : fx.replace('_', ' ').toUpperCase();
+    setAutoSyncToast(`Audio Effect: ${label}`);
     setTimeout(() => setAutoSyncToast(null), 2500);
   };
 
@@ -1464,11 +1597,15 @@ export default function App() {
       case 'favorite':
         return tracks.filter((t) => t.isFavorite);
       case 'recent_play':
-        return [...tracks].sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0));
+        return [...tracks]
+          .filter((t) => (t.playCount || 0) > 0 || (t.lastPlayed && t.lastPlayed > 0))
+          .sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0));
       case 'recent_add':
-        return [...tracks].sort((a, b) => b.dateAdded - a.dateAdded);
+        return [...tracks].sort((a, b) => (b.dateAdded || 0) - (a.dateAdded || 0));
       case 'most_play':
-        return [...tracks].sort((a, b) => (b.playCount || 0) - (a.playCount || 0));
+        return [...tracks]
+          .filter((t) => (t.playCount || 0) > 0)
+          .sort((a, b) => (b.playCount || 0) - (a.playCount || 0));
       case 'playlist_detail':
         const pl = playlists.find((p) => p.id === selectedPlaylistId);
         if (!pl) return [];

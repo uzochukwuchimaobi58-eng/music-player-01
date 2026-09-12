@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   ChevronDown,
   Play,
@@ -28,10 +28,13 @@ import {
   MoreVertical,
   Image as ImageIcon,
   Subtitles,
+  X,
+  Check,
 } from 'lucide-react';
 import { Track, RepeatMode } from '../types';
 import { TrendingAudioEffect } from '../services/audioEngine';
 import { VisualizerCanvas } from './VisualizerCanvas';
+import { parseLrcLyrics } from '../services/lyricsScanner';
 
 interface FullPlayerProps {
   isOpen: boolean;
@@ -116,27 +119,25 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
   const [showFXMenu, setShowFXMenu] = useState(false);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
 
-  if (!isOpen || !currentTrack) return null;
+  // Dynamic Synchronized Captions based on currentTime using unified parseLrcLyrics
+  const parsedLyrics = useMemo(() => {
+    if (!isOpen || !currentTrack?.lyrics) return [];
+    return parseLrcLyrics(currentTrack.lyrics, duration || 180);
+  }, [isOpen, currentTrack?.lyrics, duration]);
 
-  // Dynamic Synchronized Captions based on currentTime
-  let currentCaptionText: string | null = null;
-  if (currentTrack.lyrics) {
-    const lines = currentTrack.lyrics.split('\n');
-    for (const line of lines) {
-      const match = line.match(/\[(\d{2}):(\d{2})(\.\d{2})?\](.*)/);
-      if (match) {
-        const min = parseInt(match[1], 10);
-        const sec = parseInt(match[2], 10);
-        const lineTime = min * 60 + sec;
-        if (currentTime >= lineTime) {
-          currentCaptionText = match[4].trim();
-        }
+  const currentCaptionText = useMemo(() => {
+    if (!isOpen || parsedLyrics.length === 0) return null;
+    let foundText: string | null = null;
+    for (let i = parsedLyrics.length - 1; i >= 0; i--) {
+      if (currentTime >= parsedLyrics[i].time) {
+        foundText = parsedLyrics[i].text;
+        break;
       }
     }
-    if (!currentCaptionText && lines.length > 0) {
-      currentCaptionText = lines[0].replace(/\[.*?\]/, '').trim();
-    }
-  }
+    return foundText || parsedLyrics[0]?.text || null;
+  }, [isOpen, parsedLyrics, currentTime]);
+
+  if (!isOpen || !currentTrack) return null;
 
   const handleTouchStart = (e: React.TouchEvent) => {
     if (!swipeToChangeSongs) return;
@@ -250,7 +251,7 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
           className="flex-1 min-h-0 py-1 flex flex-col items-center justify-center my-auto cursor-grab active:cursor-grabbing overflow-hidden"
         >
           {/* Vinyl Disc Container - responsive height that scales down on compact screens */}
-          <div className="relative w-44 h-44 sm:w-60 sm:h-60 max-h-[25vh] sm:max-h-[32vh] aspect-square my-auto flex items-center justify-center shrink-0">
+          <div className="relative w-36 h-36 sm:w-48 sm:h-48 max-h-[18vh] sm:max-h-[24vh] aspect-square my-auto flex items-center justify-center shrink-0">
             {/* Ambient visualizer ring */}
             <div
               className={`absolute inset-0 rounded-full transition-all duration-700 ${
@@ -275,7 +276,7 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
                   e.stopPropagation();
                   if (onOpenArtwork) onOpenArtwork(currentTrack);
                 }}
-                className="relative w-24 h-24 sm:w-34 sm:h-34 rounded-full overflow-hidden border-2 border-zinc-700 shadow-inner group cursor-pointer"
+                className="relative w-20 h-20 sm:w-28 sm:h-28 rounded-full overflow-hidden border-2 border-zinc-700 shadow-inner group cursor-pointer"
                 title="Change Cover Artwork (Camera / Gallery)"
               >
                 <img
@@ -297,106 +298,81 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
             </div>
           </div>
 
-          {/* Audio Visualizer Canvas */}
-          <div className="w-full max-w-xs h-6 sm:h-8 mt-1 px-2 shrink-0">
+          {/* Audio Visualizer Canvas - Made bigger and taller as requested */}
+          <div className="w-full max-w-sm sm:max-w-md h-12 sm:h-14 my-1 px-2 shrink-0">
             <VisualizerCanvas
               isPlaying={isPlaying}
               type={visualizerMode}
-              color="#ffffff"
-              barCount={28}
+              color={accentColorHex || '#f59e0b'}
+              barCount={30}
+              className="w-full h-full"
             />
           </div>
 
-          {/* Live Captions / Subtitle Bar */}
+          {/* Live Captions / Subtitle Bar - Made bigger and clearer as requested */}
           <div
+            id="full-player-lyrics-caption-bar"
             onClick={onOpenLyrics}
-            className="w-full max-w-xs mt-1 px-3 py-1 rounded-xl bg-zinc-900/90 border border-zinc-800 hover:border-amber-500/50 text-center cursor-pointer transition-all shadow-md group backdrop-blur-sm shrink-0"
+            className="w-full max-w-sm sm:max-w-md my-1 px-4 py-2 rounded-2xl bg-zinc-900/90 border border-zinc-700/80 hover:border-amber-500/60 text-center cursor-pointer transition-all shadow-lg group backdrop-blur-md shrink-0 active:scale-[0.98]"
             title="Tap to scan music or view live captions"
           >
-            <div className="flex items-center justify-center gap-1 text-[9px] text-amber-400 font-bold uppercase tracking-wider">
-              <Subtitles className="w-2.5 h-2.5 animate-pulse" />
+            <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-amber-400 uppercase tracking-wider">
+              <Subtitles className="w-3.5 h-3.5 animate-pulse" />
               <span>Live Lyrics Captions</span>
             </div>
-            <p className="text-[11px] font-semibold text-zinc-200 group-hover:text-amber-300 transition-colors line-clamp-1">
+            <p className="text-sm sm:text-base font-bold text-zinc-100 group-hover:text-amber-300 transition-colors line-clamp-1 mt-0.5 leading-snug">
               {currentCaptionText || 'Tap to Scan Music & Show Live Captions'}
             </p>
           </div>
 
-          {/* Viral FX & Tools Chips */}
-          <div className="flex flex-wrap items-center justify-center gap-1 mt-1 shrink-0">
-            {/* Trending Audio Mode Selector */}
-            <div className="relative">
-              <button
-                onClick={() => setShowFXMenu(!showFXMenu)}
-                className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-indigo-500/20 to-purple-500/20 border border-indigo-500/40 text-[9px] font-bold text-indigo-300 hover:text-white transition-all cursor-pointer"
-              >
-                <Zap className="w-2.5 h-2.5 text-amber-400" />
-                <span className="capitalize">{activeTrendingEffect.replace('_', ' ')}</span>
-              </button>
-
-              {showFXMenu && (
-                <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-zinc-950 border border-zinc-800 rounded-2xl p-2 shadow-2xl z-50 w-60 flex flex-col gap-1 animate-in fade-in zoom-in-95">
-                  <p className="text-[10px] font-bold text-zinc-500 px-2 py-1 uppercase tracking-widest">
-                    Trending Audio Filters
-                  </p>
-                  {trendingEffectsList.map((fx) => (
-                    <button
-                      key={fx.id}
-                      onClick={() => {
-                        onSetTrendingEffect(fx.id);
-                        setShowFXMenu(false);
-                      }}
-                      className={`w-full flex items-center justify-between p-2 rounded-xl text-left transition-all cursor-pointer ${
-                        activeTrendingEffect === fx.id
-                          ? 'bg-indigo-600 text-white font-bold'
-                          : 'text-zinc-300 hover:bg-zinc-900'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span>{fx.icon}</span>
-                        <div>
-                          <p className="text-xs">{fx.label}</p>
-                          <p className="text-[9px] opacity-75">{fx.desc}</p>
-                        </div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+          {/* Viral FX & Tools Chips - Made bigger and easier to tap as requested */}
+          <div className="flex flex-wrap items-center justify-center gap-2 my-1 shrink-0">
+            {/* Trending Audio Mode Selector Button */}
+            <button
+              id="btn-open-audio-fx-menu"
+              onClick={() => setShowFXMenu(true)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-indigo-500/25 to-purple-500/25 border border-indigo-500/50 text-xs sm:text-sm font-bold text-indigo-200 hover:text-white transition-all cursor-pointer shadow-sm hover:shadow-indigo-500/20 active:scale-95"
+              title="Change Audio Filter Effect"
+            >
+              <Zap className="w-4 h-4 text-amber-400" />
+              <span className="capitalize">{activeTrendingEffect === 'normal' ? 'Normal' : activeTrendingEffect.replace('_', ' ')}</span>
+            </button>
 
             {/* Karaoke Mode Toggle */}
             <button
+              id="btn-toggle-karaoke"
               onClick={onToggleKaraoke}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border transition-all cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-bold border transition-all cursor-pointer active:scale-95 ${
                 isKaraokeMode
-                  ? 'bg-rose-500/20 border-rose-500 text-rose-300 animate-pulse'
-                  : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+                  ? 'bg-rose-500/25 border-rose-500 text-rose-300 shadow-md shadow-rose-500/25 animate-pulse'
+                  : 'bg-zinc-900/90 border-zinc-700/80 text-zinc-300 hover:text-white'
               }`}
             >
-              {isKaraokeMode ? <MicOff className="w-2.5 h-2.5 text-rose-400" /> : <Mic2 className="w-2.5 h-2.5 text-rose-400" />}
+              {isKaraokeMode ? <MicOff className="w-4 h-4 text-rose-400" /> : <Mic2 className="w-4 h-4 text-rose-400" />}
               <span>{isKaraokeMode ? 'Karaoke ON' : 'Karaoke'}</span>
             </button>
 
             {/* Ringtone Cutter Shortcut */}
             <button
+              id="btn-trim-ringtone"
               onClick={onOpenRingtoneTrimmer}
-              className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-[9px] font-bold text-zinc-300 hover:text-white transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/80 text-xs sm:text-sm font-bold text-zinc-200 hover:text-white transition-all cursor-pointer active:scale-95"
             >
-              <Scissors className="w-2.5 h-2.5 text-emerald-400" />
+              <Scissors className="w-4 h-4 text-emerald-400" />
               <span>Trim Ringtone</span>
             </button>
 
             {/* Visualizer Mode Switcher */}
             <button
+              id="btn-toggle-visualizer-fx"
               onClick={() => {
                 setVisualizerMode((prev) =>
                   prev === 'bars' ? 'wave' : prev === 'wave' ? 'circle' : 'bars'
                 );
               }}
-              className="px-2 py-0.5 rounded-full bg-zinc-900 hover:bg-zinc-800 text-[9px] font-bold text-zinc-400 hover:text-zinc-200 border border-zinc-800 transition-colors uppercase"
+              className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-zinc-900/90 hover:bg-zinc-800 text-xs sm:text-sm font-bold text-zinc-300 hover:text-white border border-zinc-700/80 transition-all uppercase active:scale-95"
             >
-              FX: {visualizerMode}
+              <span>FX: {visualizerMode}</span>
             </button>
           </div>
         </div>
@@ -450,16 +426,18 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
 
           {/* Main Controls: Shuffle, Prev, Play/Pause, Next, Repeat */}
           <div className="flex items-center justify-between gap-2 mt-1 sm:mt-2">
-            {/* Shuffle Toggle */}
+            {/* Shuffle Toggle - Made bigger and clearer as requested */}
             <button
               id="btn-full-shuffle"
               onClick={onToggleShuffle}
               title={isShuffle ? 'Shuffle On' : 'Shuffle Off'}
-              className={`p-2 rounded-lg transition-colors cursor-pointer ${
-                isShuffle ? 'text-white bg-zinc-800' : 'text-zinc-500 hover:text-white'
+              className={`p-3 sm:p-3.5 rounded-2xl border transition-all cursor-pointer active:scale-90 flex items-center justify-center ${
+                isShuffle
+                  ? 'bg-amber-500/25 border-amber-500/70 text-amber-300 shadow-md shadow-amber-500/20'
+                  : 'bg-zinc-900/80 border-zinc-800/90 text-zinc-400 hover:text-white hover:border-zinc-700'
               }`}
             >
-              <Shuffle className="w-5 h-5" />
+              <Shuffle className="w-6 h-6 sm:w-7 sm:h-7" />
             </button>
 
             {/* Skip Back 10s (controlled by forwardAndBackward setting) */}
@@ -477,7 +455,7 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
             <button
               id="btn-full-prev"
               onClick={onPrevTrack}
-              className="p-2 rounded-lg text-white hover:text-zinc-300 active:scale-90 transition-all cursor-pointer"
+              className="p-2.5 sm:p-3 rounded-2xl text-white hover:text-zinc-300 active:scale-90 transition-all cursor-pointer"
             >
               <SkipBack className="w-6 h-6 sm:w-7 sm:h-7 fill-current" />
             </button>
@@ -486,15 +464,15 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
             <button
               id="btn-full-play-pause"
               onClick={onTogglePlay}
-              className="w-13 h-13 sm:w-16 sm:h-16 rounded-full bg-white hover:bg-zinc-200 text-black flex items-center justify-center shadow-2xl active:scale-95 transition-all cursor-pointer"
+              className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-white hover:bg-zinc-200 text-black flex items-center justify-center shadow-2xl active:scale-95 transition-all cursor-pointer"
               style={{
                 boxShadow: `0 0 25px ${accentColorHex}50`
               }}
             >
               {isPlaying ? (
-                <Pause className="w-6 h-6 sm:w-8 sm:h-8 fill-black" />
+                <Pause className="w-7 h-7 sm:w-8 sm:h-8 fill-black" />
               ) : (
-                <Play className="w-6 h-6 sm:w-8 sm:h-8 fill-black ml-0.5" />
+                <Play className="w-7 h-7 sm:w-8 sm:h-8 fill-black ml-0.5" />
               )}
             </button>
 
@@ -502,7 +480,7 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
             <button
               id="btn-full-next"
               onClick={onNextTrack}
-              className="p-2 rounded-lg text-white hover:text-zinc-300 active:scale-90 transition-all cursor-pointer"
+              className="p-2.5 sm:p-3 rounded-2xl text-white hover:text-zinc-300 active:scale-90 transition-all cursor-pointer"
             >
               <SkipForward className="w-6 h-6 sm:w-7 sm:h-7 fill-current" />
             </button>
@@ -518,18 +496,18 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
               </button>
             )}
 
-            {/* Repeat Mode */}
+            {/* Repeat Mode - Made bigger and clearer as requested */}
             <button
               id="btn-full-repeat"
               onClick={onToggleRepeat}
               title={`Repeat: ${repeatMode}`}
-              className={`p-2 rounded-lg transition-colors cursor-pointer ${
+              className={`p-3 sm:p-3.5 rounded-2xl border transition-all cursor-pointer active:scale-90 flex items-center justify-center ${
                 repeatMode !== 'off'
-                  ? 'text-white bg-zinc-800'
-                  : 'text-zinc-500 hover:text-white'
+                  ? 'bg-amber-500/25 border-amber-500/70 text-amber-300 shadow-md shadow-amber-500/20'
+                  : 'bg-zinc-900/80 border-zinc-800/90 text-zinc-400 hover:text-white hover:border-zinc-700'
               }`}
             >
-              {repeatMode === 'one' ? <Repeat1 className="w-5 h-5" /> : <Repeat className="w-5 h-5" />}
+              {repeatMode === 'one' ? <Repeat1 className="w-6 h-6 sm:w-7 sm:h-7" /> : <Repeat className="w-6 h-6 sm:w-7 sm:h-7" />}
             </button>
           </div>
 
@@ -581,6 +559,74 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Centered Modal: Trending Audio Filters Overlay on User Screen */}
+      {showFXMenu && (
+        <div
+          id="trending-fx-modal-backdrop"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200"
+          onClick={() => setShowFXMenu(false)}
+        >
+          <div
+            id="trending-fx-modal-card"
+            className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-3xl p-5 shadow-2xl flex flex-col gap-3.5 animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-800/80">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center">
+                  <Zap className="w-4 h-4 text-indigo-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Audio FX & Filters</h3>
+                  <p className="text-[11px] text-zinc-400">Live filters for playing music</p>
+                </div>
+              </div>
+              <button
+                id="btn-close-fx-menu"
+                onClick={() => setShowFXMenu(false)}
+                className="p-1.5 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-2 max-h-[60vh] overflow-y-auto pr-1">
+              {trendingEffectsList.map((fx) => {
+                const isSelected = activeTrendingEffect === fx.id;
+                return (
+                  <button
+                    key={fx.id}
+                    id={`btn-fx-${fx.id}`}
+                    onClick={() => {
+                      onSetTrendingEffect(fx.id);
+                      setShowFXMenu(false);
+                    }}
+                    className={`w-full flex items-center justify-between p-3 rounded-2xl text-left transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold shadow-lg shadow-indigo-500/25 border border-indigo-400/40'
+                        : 'text-zinc-200 hover:bg-zinc-900 border border-zinc-800/70 hover:border-zinc-700'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl p-2 rounded-xl bg-black/40 border border-white/5">{fx.icon}</span>
+                      <div>
+                        <p className="text-sm font-bold">{fx.label}</p>
+                        <p className={`text-xs ${isSelected ? 'text-indigo-100' : 'text-zinc-400'}`}>{fx.desc}</p>
+                      </div>
+                    </div>
+                    {isSelected && (
+                      <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center shrink-0 mr-1">
+                        <Check className="w-4 h-4 text-white" />
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

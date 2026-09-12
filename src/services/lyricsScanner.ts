@@ -10,12 +10,120 @@ export interface ParsedLyricLine {
 export interface LyricsScanResult {
   lyrics: string;
   lines: ParsedLyricLine[];
-  source: 'embedded_metadata' | 'cached_lrc' | 'local_file' | 'audio_synced';
+  source: 'embedded_metadata' | 'cached_lrc' | 'local_file' | 'audio_synced' | 'online_synced' | 'online_plain';
   sourceLabel: string;
   filename?: string;
 }
 
 const LRC_CACHE_PREFIX = 'track_lrc_cache_';
+
+/**
+ * Strips noise, extensions, and tags from track titles for accurate online matching
+ */
+export function cleanTrackTitle(rawTitle: string): string {
+  if (!rawTitle) return '';
+  return rawTitle
+    .replace(/\.[a-z0-9]{2,4}$/i, '') // remove .mp3, .flac, .m4a
+    .replace(/[\(\[](?:official\s*(?:video|audio|music\s*video|lyric\s*video|hd|4k)?|lyrics?|remaster(?:ed)?|bonus\s*track|explicit|clean|audio|visualizer)[\)\]]/gi, '')
+    .replace(/\s*(?:ft\.?|feat\.?)\s+.*$/i, '')
+    .replace(/\s*-\s*(?:official\s*video|audio|lyrics?)$/i, '')
+    .replace(/[_]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Strips featured artists and secondary names to match primary artist
+ */
+export function cleanTrackArtist(rawArtist: string): string {
+  if (!rawArtist || rawArtist.toLowerCase() === 'unknown artist') return '';
+  return rawArtist
+    .replace(/\s*(?:ft\.?|feat\.?)\s+.*$/i, '')
+    .replace(/[_]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Fetches verified synchronized LRC or plain lyrics from LRCLIB and lyrics.ovh
+ */
+export async function fetchOnlineLyrics(
+  title: string,
+  artist: string,
+  duration?: number
+): Promise<{ lyrics: string; synced: boolean } | null> {
+  const cleanTitle = cleanTrackTitle(title);
+  const cleanArtist = cleanTrackArtist(artist);
+  if (!cleanTitle) return null;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 4500);
+
+  try {
+    // 1. Exact LRCLIB match
+    if (cleanArtist) {
+      try {
+        const exactUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(cleanArtist)}&track_name=${encodeURIComponent(cleanTitle)}${
+          duration && duration > 20 ? `&duration=${Math.round(duration)}` : ''
+        }`;
+        const exactRes = await fetch(exactUrl, { signal: controller.signal });
+        if (exactRes.ok) {
+          const data = await exactRes.json();
+          if (data.syncedLyrics && data.syncedLyrics.trim().length > 0) {
+            clearTimeout(timeoutId);
+            return { lyrics: data.syncedLyrics, synced: true };
+          }
+          if (data.plainLyrics && data.plainLyrics.trim().length > 0) {
+            clearTimeout(timeoutId);
+            return { lyrics: data.plainLyrics, synced: false };
+          }
+        }
+      } catch (e) {
+        // Fall through to search query
+      }
+    }
+
+    // 2. Fuzzy LRCLIB search query
+    const searchQuery = cleanArtist ? `${cleanArtist} ${cleanTitle}` : cleanTitle;
+    const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(searchQuery)}`;
+    const searchRes = await fetch(searchUrl, { signal: controller.signal });
+    if (searchRes.ok) {
+      const results = await searchRes.json();
+      if (Array.isArray(results) && results.length > 0) {
+        // Prefer item with syncedLyrics
+        const withSynced = results.find((r) => r.syncedLyrics && r.syncedLyrics.trim().length > 0);
+        if (withSynced) {
+          clearTimeout(timeoutId);
+          return { lyrics: withSynced.syncedLyrics, synced: true };
+        }
+        const withPlain = results.find((r) => r.plainLyrics && r.plainLyrics.trim().length > 0);
+        if (withPlain) {
+          clearTimeout(timeoutId);
+          return { lyrics: withPlain.plainLyrics, synced: false };
+        }
+      }
+    }
+
+    // 3. Fallback to free lyrics.ovh if artist exists
+    if (cleanArtist) {
+      const ovhUrl = `https://api.lyrics.ovh/v1/${encodeURIComponent(cleanArtist)}/${encodeURIComponent(cleanTitle)}`;
+      const ovhRes = await fetch(ovhUrl, { signal: controller.signal });
+      if (ovhRes.ok) {
+        const ovhData = await ovhRes.json();
+        if (ovhData.lyrics && ovhData.lyrics.trim().length > 0) {
+          clearTimeout(timeoutId);
+          return { lyrics: ovhData.lyrics, synced: false };
+        }
+      }
+    }
+  } catch (err) {
+    console.debug('Online lyrics fetch note:', err);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  return null;
+}
 
 /**
  * Parses raw LRC or text lines into timestamped lines (in seconds)
@@ -165,7 +273,42 @@ export async function autoScanTrackLyrics(
     console.debug('Offline blob metadata check:', err);
   }
 
-  // 5. Intelligent Synchronized Waveform & Tempo Cadence Scan
+  // 5. Check Online Lyrics Database (LRCLIB Synchronized LRC & Lyrics.ovh)
+  try {
+    const onlineResult = await fetchOnlineLyrics(track.title, track.artist, track.duration);
+    if (onlineResult && onlineResult.lyrics.trim().length > 0) {
+      let finalLrc = onlineResult.lyrics;
+      if (!onlineResult.synced) {
+        // Synthesize timing timestamps from plain text lines
+        const plainLines = finalLrc.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+        const songDur = track.duration || 180;
+        const lineInterval = Math.max(3.5, songDur / (plainLines.length + 1));
+        finalLrc = plainLines
+          .map((text, idx) => {
+            const timeSec = Math.min(songDur - 2, 4 + idx * lineInterval);
+            const m = Math.floor(timeSec / 60);
+            const s = Math.floor(timeSec % 60);
+            return `[${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.00] ${text}`;
+          })
+          .join('\n');
+      }
+
+      const parsed = parseLrcLyrics(finalLrc, track.duration || 180);
+      if (parsed.length > 0) {
+        await saveLrcToCache(track, finalLrc);
+        return {
+          lyrics: finalLrc,
+          lines: parsed,
+          source: onlineResult.synced ? 'online_synced' : 'online_plain',
+          sourceLabel: onlineResult.synced ? 'LRCLIB Live Synced Lyrics' : 'Online Synchronized Lyrics',
+        };
+      }
+    }
+  } catch (err) {
+    console.debug('Online lyrics auto-scan notice:', err);
+  }
+
+  // 6. Intelligent Synchronized Waveform & Tempo Cadence Scan fallback
   const songDur = track.duration || 180;
   const interval = Math.max(7, Math.floor(songDur / 9));
 

@@ -68,12 +68,50 @@ class MusicLibraryPlugin : Plugin() {
                 "previous" -> {
                     playbackManager?.playPrevious()
                 }
+                "pause" -> {
+                    playbackManager?.pause()
+                    MusicPlaybackService.update(
+                        context,
+                        title = currentTitle,
+                        artist = currentArtist,
+                        album = currentAlbum,
+                        songId = currentSongId,
+                        albumId = 0L,
+                        coverArt = currentCoverArt,
+                        isPlaying = false,
+                        positionMs = (playbackManager?.currentPosition ?: 0).toLong(),
+                        durationMs = (playbackManager?.duration ?: 0).toLong(),
+                        isFavorite = isFavorite
+                    )
+                }
+                "play" -> {
+                    playbackManager?.resume()
+                    MusicPlaybackService.update(
+                        context,
+                        title = currentTitle,
+                        artist = currentArtist,
+                        album = currentAlbum,
+                        songId = currentSongId,
+                        albumId = 0L,
+                        coverArt = currentCoverArt,
+                        isPlaying = true,
+                        positionMs = (playbackManager?.currentPosition ?: 0).toLong(),
+                        durationMs = (playbackManager?.duration ?: 0).toLong(),
+                        isFavorite = isFavorite
+                    )
+                }
                 "toggle" -> {
                     if (playbackManager?.isPlaying == true) {
                         playbackManager?.pause()
                     } else {
                         playbackManager?.resume()
                     }
+                }
+                "seekTo" -> {
+                    playbackManager?.seekTo(position.toInt())
+                }
+                "close" -> {
+                    playbackManager?.pause()
                 }
             }
             val data = JSObject().apply {
@@ -310,36 +348,10 @@ class MusicLibraryPlugin : Plugin() {
             return
         }
 
-        // Parse optional queue to enable instant background playback and lock-screen progression
-        val queueArray = call.getArray("queue")
-        if (queueArray != null && queueArray.length() > 0) {
-            val items = mutableListOf<PlaybackManager.NativeQueueTrack>()
-            for (i in 0 until queueArray.length()) {
-                val obj = queueArray.getJSONObject(i)
-                items.add(
-                    PlaybackManager.NativeQueueTrack(
-                        id = obj.optString("id", ""),
-                        uri = if (obj.has("uri") && !obj.isNull("uri")) obj.optString("uri") else null,
-                        title = obj.optString("title", "Unknown Title"),
-                        artist = obj.optString("artist", "Unknown Artist"),
-                        album = if (obj.has("album") && !obj.isNull("album")) obj.optString("album") else null,
-                        coverArt = if (obj.has("coverArt") && !obj.isNull("coverArt")) obj.optString("coverArt") else null,
-                        duration = obj.optLong("duration", 0L),
-                        isFavorite = obj.optBoolean("isFavorite", false)
-                    )
-                )
-            }
-            var startIndex = call.getInt("currentIndex") ?: -1
-            if (startIndex == -1 && !id.isNullOrBlank()) {
-                startIndex = items.indexOfFirst { it.id == id }
-            }
-            val repeat = call.getString("repeatMode")
-            val shuffle = call.getBoolean("isShuffle")
-            playbackManager?.setQueue(items, startIndex, repeat, shuffle)
-        }
-
+        // 1. Start audio playback immediately on user tap (zero delay)
         playbackManager?.playTrack(uri, id)
 
+        // 2. Update Foreground Notification instantly
         MusicPlaybackService.update(
             context,
             title = title,
@@ -353,6 +365,35 @@ class MusicLibraryPlugin : Plugin() {
             durationMs = duration.toLong(),
             isFavorite = isFav
         )
+
+        // 3. Set queue in background if provided
+        val queueArray = call.getArray("queue")
+        if (queueArray != null && queueArray.length() > 0) {
+            val items = mutableListOf<PlaybackManager.NativeQueueTrack>()
+            val maxItems = Math.min(queueArray.length(), 200)
+            for (i in 0 until maxItems) {
+                val obj = queueArray.getJSONObject(i)
+                items.add(
+                    PlaybackManager.NativeQueueTrack(
+                        id = obj.optString("id", ""),
+                        uri = if (obj.has("uri") && !obj.isNull("uri")) obj.optString("uri") else null,
+                        title = obj.optString("title", "Unknown Title"),
+                        artist = obj.optString("artist", "Unknown Artist"),
+                        album = if (obj.has("album") && !obj.isNull("album")) obj.optString("album") else null,
+                        coverArt = null, // Strip heavy base64 strings from queue items to prevent memory bloat
+                        duration = obj.optLong("duration", 0L),
+                        isFavorite = obj.optBoolean("isFavorite", false)
+                    )
+                )
+            }
+            var startIndex = call.getInt("currentIndex") ?: -1
+            if (startIndex == -1 && !id.isNullOrBlank()) {
+                startIndex = items.indexOfFirst { it.id == id }
+            }
+            val repeat = call.getString("repeatMode")
+            val shuffle = call.getBoolean("isShuffle")
+            playbackManager?.setQueue(items, startIndex, repeat, shuffle)
+        }
 
         val ret = JSObject().apply {
             put("status", "preparing")
@@ -516,6 +557,9 @@ class MusicLibraryPlugin : Plugin() {
             put("isPlaying", mgr?.isPlaying ?: false)
             put("currentPosition", mgr?.currentPosition ?: 0)
             put("duration", mgr?.duration ?: 0)
+            put("currentSongId", if (currentSongId > 0L) currentSongId.toString() else "")
+            put("title", currentTitle)
+            put("artist", currentArtist)
         }
         call.resolve(ret)
     }
@@ -529,6 +573,13 @@ class MusicLibraryPlugin : Plugin() {
             put("artwork", artwork)
         }
         call.resolve(ret)
+    }
+
+    @PluginMethod
+    fun setPlaybackRate(call: PluginCall) {
+        val rate = (call.getDouble("rate") ?: 1.0).toFloat()
+        playbackManager?.setPlaybackRate(rate)
+        call.resolve()
     }
 
     @PluginMethod

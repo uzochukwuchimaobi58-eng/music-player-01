@@ -154,6 +154,15 @@ class PlaybackManager(private val context: Context) {
                     isPrepared = true
                     try {
                         setupAudioEffects(mp.audioSessionId)
+                        if (currentSpeed != 1.0f && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                            try {
+                                val params = mp.playbackParams
+                                params.speed = currentSpeed
+                                mp.playbackParams = params
+                            } catch (pe: Exception) {
+                                android.util.Log.w("PlaybackManager", "Error setting initial speed: $pe")
+                            }
+                        }
                         mp.start()
                         onStateChangeCallback?.invoke(true)
                         onPreparedCallback?.invoke(mp.duration, mp.currentPosition)
@@ -377,6 +386,28 @@ class PlaybackManager(private val context: Context) {
             }
         } catch (e: Exception) {
             android.util.Log.w("PlaybackManager", "Error applying audio effects: $e")
+        }
+    }
+
+    private var currentSpeed: Float = 1.0f
+
+    /**
+     * Set playback speed/rate (0.5x to 2.0x) on Android API 23+ (Marshmallow and above)
+     */
+    fun setPlaybackRate(speed: Float) {
+        currentSpeed = speed.coerceIn(0.25f, 2.5f)
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                mediaPlayer?.let { mp ->
+                    if (isPrepared) {
+                        val params = mp.playbackParams
+                        params.speed = currentSpeed
+                        mp.playbackParams = params
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("PlaybackManager", "Error setting playback speed: $e")
         }
     }
 

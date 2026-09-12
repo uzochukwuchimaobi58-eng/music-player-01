@@ -58,14 +58,31 @@ export const HomeGrid: React.FC<HomeGridProps> = ({
 }) => {
   const theme = getThemeConfig(currentTheme);
 
-  // Compute counts (with default screenshot visual reference fallback if initial sample is small)
-  const libraryCount = tracks.length >= 10 ? tracks.length : 1868;
-  const folders = Array.from(new Set(tracks.map((t) => t.folder || 'Phone Storage')));
-  const folderCount = folders.length > 3 ? folders.length : 10;
-  const favoriteCount = tracks.filter((t) => t.isFavorite).length || 52;
-  const recentPlayCount = tracks.filter((t) => (t.playCount || 0) > 0).length || 1539;
-  const recentAddCount = tracks.length > 5 ? tracks.length : 34;
-  const mostPlayCount = tracks.reduce((acc, t) => acc + (t.playCount || 0), 0) || 615;
+  // Compute real counts strictly from user music library. Absolutely NO hardcoded fallback numbers!
+  const hasTracks = tracks.length > 0;
+  const libraryCount = tracks.length;
+
+  const validFolders = Array.from(
+    new Set(
+      tracks
+        .map((t) => t.folder)
+        .filter((f): f is string => Boolean(f && f.trim() && f !== '<unknown>'))
+    )
+  );
+  const folderCount = validFolders.length > 0 ? validFolders.length : (hasTracks ? 1 : 0);
+
+  const favoriteCount = tracks.filter((t) => t.isFavorite).length;
+
+  const recentPlayTracks = tracks.filter(
+    (t) => (t.playCount || 0) > 0 || (t.lastPlayed && t.lastPlayed > 0)
+  );
+  const recentPlayCount = recentPlayTracks.length;
+
+  const recentAddCount = tracks.length;
+
+  // Total times music has been played across all songs
+  const totalPlays = tracks.reduce((acc, t) => acc + (t.playCount || 0), 0);
+  const mostPlayCount = totalPlays;
 
   return (
     <div
@@ -88,10 +105,12 @@ export const HomeGrid: React.FC<HomeGridProps> = ({
           }}
           className="hover:brightness-105 active:scale-[0.97] transition-all rounded-lg p-2.5 aspect-[1/1] flex flex-col justify-between items-center shadow-md cursor-pointer group"
         >
-          <div className="w-full flex justify-end">
-            <span className="text-xs font-medium text-white/90 leading-none">
-              {libraryCount}
-            </span>
+          <div className="w-full flex justify-end h-3.5">
+            {libraryCount > 0 && (
+              <span className="text-xs font-medium text-white/90 leading-none">
+                {libraryCount}
+              </span>
+            )}
           </div>
           <div className="flex-1 flex items-center justify-center">
             <Music className="w-9 h-9 stroke-[2.2] drop-shadow-xs" />
@@ -112,10 +131,12 @@ export const HomeGrid: React.FC<HomeGridProps> = ({
           }}
           className="hover:brightness-105 active:scale-[0.97] transition-all rounded-lg p-2.5 aspect-[1/1] flex flex-col justify-between items-center shadow-md cursor-pointer group"
         >
-          <div className="w-full flex justify-end">
-            <span className="text-xs font-medium text-white/90 leading-none">
-              {folderCount}
-            </span>
+          <div className="w-full flex justify-end h-3.5">
+            {folderCount > 0 && (
+              <span className="text-xs font-medium text-white/90 leading-none">
+                {folderCount}
+              </span>
+            )}
           </div>
           <div className="flex-1 flex items-center justify-center">
             <Folder className="w-9 h-9 fill-white stroke-white drop-shadow-xs" />
@@ -136,10 +157,12 @@ export const HomeGrid: React.FC<HomeGridProps> = ({
           }}
           className="hover:brightness-105 active:scale-[0.97] transition-all rounded-lg p-2.5 aspect-[1/1] flex flex-col justify-between items-center shadow-md cursor-pointer group"
         >
-          <div className="w-full flex justify-end">
-            <span className="text-xs font-medium text-white/90 leading-none">
-              {favoriteCount}
-            </span>
+          <div className="w-full flex justify-end h-3.5">
+            {favoriteCount > 0 && (
+              <span className="text-xs font-medium text-white/90 leading-none">
+                {favoriteCount}
+              </span>
+            )}
           </div>
           <div className="flex-1 flex items-center justify-center">
             <Heart className="w-9 h-9 fill-white stroke-white drop-shadow-xs" />
@@ -160,10 +183,12 @@ export const HomeGrid: React.FC<HomeGridProps> = ({
           }}
           className="hover:brightness-105 active:scale-[0.97] transition-all rounded-lg p-2.5 aspect-[1/1] flex flex-col justify-between items-center shadow-md cursor-pointer group"
         >
-          <div className="w-full flex justify-end">
-            <span className="text-xs font-medium text-white/90 leading-none">
-              {recentPlayCount}
-            </span>
+          <div className="w-full flex justify-end h-3.5">
+            {recentPlayCount > 0 && (
+              <span className="text-xs font-medium text-white/90 leading-none">
+                {recentPlayCount}
+              </span>
+            )}
           </div>
           <div className="flex-1 flex items-center justify-center">
             {/* Clock circle with play icon inside */}
@@ -190,10 +215,12 @@ export const HomeGrid: React.FC<HomeGridProps> = ({
           }}
           className="hover:brightness-105 active:scale-[0.97] transition-all rounded-lg p-2.5 aspect-[1/1] flex flex-col justify-between items-center shadow-md cursor-pointer group"
         >
-          <div className="w-full flex justify-end">
-            <span className="text-xs font-medium text-white/90 leading-none">
-              {recentAddCount}
-            </span>
+          <div className="w-full flex justify-end h-3.5">
+            {recentAddCount > 0 && (
+              <span className="text-xs font-medium text-white/90 leading-none">
+                {recentAddCount}
+              </span>
+            )}
           </div>
           <div className="flex-1 flex items-center justify-center">
             {/* Clock circle with plus icon inside */}
@@ -224,10 +251,12 @@ export const HomeGrid: React.FC<HomeGridProps> = ({
           }}
           className="hover:brightness-105 active:scale-[0.97] transition-all rounded-lg p-2.5 aspect-[1/1] flex flex-col justify-between items-center shadow-md cursor-pointer group"
         >
-          <div className="w-full flex justify-end">
-            <span className="text-xs font-medium text-white/90 leading-none">
-              {mostPlayCount}
-            </span>
+          <div className="w-full flex justify-end h-3.5">
+            {mostPlayCount > 0 && (
+              <span className="text-xs font-medium text-white/90 leading-none">
+                {mostPlayCount}
+              </span>
+            )}
           </div>
           <div className="flex-1 flex items-center justify-center">
             {/* Equalizer sound waves in white circle */}
