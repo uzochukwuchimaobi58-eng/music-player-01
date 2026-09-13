@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   ChevronDown,
   Play,
@@ -28,13 +28,14 @@ import {
   MoreVertical,
   Image as ImageIcon,
   Subtitles,
+  Music,
   X,
   Check,
 } from 'lucide-react';
 import { Track, RepeatMode } from '../types';
 import { TrendingAudioEffect } from '../services/audioEngine';
 import { VisualizerCanvas } from './VisualizerCanvas';
-import { parseLrcLyrics } from '../services/lyricsScanner';
+import { parseLrcLyrics, autoScanTrackLyrics } from '../services/lyricsScanner';
 
 interface FullPlayerProps {
   isOpen: boolean;
@@ -74,6 +75,7 @@ interface FullPlayerProps {
   onOpenSleepTimer: () => void;
   onOpenLyrics: () => void;
   onOpenQueue: () => void;
+  onUpdateLyrics?: (trackId: string, newLyrics: string) => void;
 }
 
 export const FullPlayer: React.FC<FullPlayerProps> = ({
@@ -114,10 +116,25 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
   onOpenSleepTimer,
   onOpenLyrics,
   onOpenQueue,
+  onUpdateLyrics,
 }) => {
   const [visualizerMode, setVisualizerMode] = useState<'bars' | 'wave' | 'circle'>('bars');
+  const [artDisplayMode, setArtDisplayMode] = useState<'cover' | 'vinyl'>('cover');
   const [showFXMenu, setShowFXMenu] = useState(false);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
+
+  // Auto-scan lyrics in background when player is opened if current track has no lyrics
+  useEffect(() => {
+    if (isOpen && currentTrack && (!currentTrack.lyrics || currentTrack.lyrics.trim().length === 0)) {
+      autoScanTrackLyrics(currentTrack)
+        .then((res) => {
+          if (res && res.lyrics && res.lyrics.trim().length > 0 && onUpdateLyrics) {
+            onUpdateLyrics(currentTrack.id, res.lyrics);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [isOpen, currentTrack?.id, currentTrack?.lyrics, onUpdateLyrics]);
 
   // Dynamic Synchronized Captions based on currentTime using unified parseLrcLyrics
   const parsedLyrics = useMemo(() => {
@@ -250,61 +267,147 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
           onTouchEnd={handleTouchEnd}
           className="flex-1 min-h-0 py-1 flex flex-col items-center justify-center my-auto cursor-grab active:cursor-grabbing overflow-hidden"
         >
-          {/* Vinyl Disc Container - responsive height that scales down on compact screens */}
-          <div className="relative w-36 h-36 sm:w-48 sm:h-48 max-h-[18vh] sm:max-h-[24vh] aspect-square my-auto flex items-center justify-center shrink-0">
-            {/* Ambient visualizer ring */}
-            <div
-              className={`absolute inset-0 rounded-full transition-all duration-700 ${
-                isPlaying ? 'scale-105 opacity-40 shadow-[0_0_60px_rgba(255,255,255,0.15)]' : 'opacity-10'
-              }`}
-            />
+          {/* Center Artwork Container - supports both prominent Album Cover Art and Vinyl Disc */}
+          {artDisplayMode === 'cover' ? (
+            <div className="relative w-44 h-44 sm:w-56 sm:h-56 max-h-[22vh] sm:max-h-[26vh] aspect-square my-auto flex items-center justify-center shrink-0">
+              {/* Ambient Glow */}
+              <div
+                className={`absolute inset-0 rounded-2xl transition-all duration-700 ${
+                  isPlaying ? 'scale-105 opacity-40 shadow-[0_0_50px_rgba(245,158,11,0.25)]' : 'opacity-10'
+                }`}
+              />
 
-            {/* Vinyl Record */}
-            <div
-              className={`relative w-full h-full rounded-full p-2 bg-zinc-950 border-4 border-zinc-800 shadow-2xl overflow-hidden flex items-center justify-center ${
-                isPlaying ? 'animate-[spin_16s_linear_infinite]' : ''
-              }`}
-            >
-              {/* Vinyl Groove Rings */}
-              <div className="absolute inset-3 rounded-full border border-zinc-800/80 pointer-events-none" />
-              <div className="absolute inset-6 rounded-full border border-zinc-800/60 pointer-events-none" />
-              <div className="absolute inset-9 rounded-full border border-zinc-800/40 pointer-events-none" />
-
-              {/* Album Art Centerpiece */}
+              {/* Album Art Card */}
               <div
                 onClick={(e) => {
                   e.stopPropagation();
                   if (onOpenArtwork) onOpenArtwork(currentTrack);
                 }}
-                className="relative w-20 h-20 sm:w-28 sm:h-28 rounded-full overflow-hidden border-2 border-zinc-700 shadow-inner group cursor-pointer"
-                title="Change Cover Artwork (Camera / Gallery)"
+                className="relative w-full h-full rounded-2xl overflow-hidden border-2 border-zinc-700/80 shadow-2xl group cursor-pointer bg-zinc-900 flex items-center justify-center"
+                title="Tap to change or edit cover artwork"
               >
-                <img
-                  src={currentTrack.coverArt}
-                  alt={currentTrack.title}
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                />
+                {currentTrack.coverArt ? (
+                  <img
+                    src={currentTrack.coverArt}
+                    alt={currentTrack.title}
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                      const fallback = e.currentTarget.nextElementSibling as HTMLElement;
+                      if (fallback) fallback.style.display = 'flex';
+                    }}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                  />
+                ) : null}
 
-                {/* Hover Camera Overlay */}
-                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-white transition-opacity">
-                  <Camera className="w-5 h-5 text-amber-400 mb-0.5" />
-                  <span className="text-[8px] font-bold uppercase tracking-wider">Edit Artwork</span>
+                <div
+                  className={`w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-amber-600/30 via-zinc-900 to-zinc-950 p-4 text-center ${
+                    currentTrack.coverArt ? 'hidden' : 'flex'
+                  }`}
+                >
+                  <Music className="w-12 h-12 text-amber-400 mb-2" />
+                  <span className="text-xs font-semibold text-zinc-300 line-clamp-1">{currentTrack.title}</span>
                 </div>
 
-                {/* Center spindle hole */}
-                <div className="absolute inset-0 m-auto w-4 h-4 rounded-full bg-black border-2 border-zinc-500 shadow-md pointer-events-none" />
+                {/* Edit Artwork Overlay */}
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-white transition-opacity">
+                  <Camera className="w-6 h-6 text-amber-400 mb-1" />
+                  <span className="text-[9px] font-bold uppercase tracking-wider">Change Artwork</span>
+                </div>
               </div>
             </div>
+          ) : (
+            <div className="relative w-36 h-36 sm:w-48 sm:h-48 max-h-[18vh] sm:max-h-[24vh] aspect-square my-auto flex items-center justify-center shrink-0">
+              {/* Ambient visualizer ring */}
+              <div
+                className={`absolute inset-0 rounded-full transition-all duration-700 ${
+                  isPlaying ? 'scale-105 opacity-40 shadow-[0_0_60px_rgba(255,255,255,0.15)]' : 'opacity-10'
+                }`}
+              />
+
+              {/* Vinyl Record */}
+              <div
+                className={`relative w-full h-full rounded-full p-2 bg-zinc-950 border-4 border-zinc-800 shadow-2xl overflow-hidden flex items-center justify-center ${
+                  isPlaying ? 'animate-[spin_16s_linear_infinite]' : ''
+                }`}
+              >
+                {/* Vinyl Groove Rings */}
+                <div className="absolute inset-3 rounded-full border border-zinc-800/80 pointer-events-none" />
+                <div className="absolute inset-6 rounded-full border border-zinc-800/60 pointer-events-none" />
+                <div className="absolute inset-9 rounded-full border border-zinc-800/40 pointer-events-none" />
+
+                {/* Album Art Centerpiece */}
+                <div
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onOpenArtwork) onOpenArtwork(currentTrack);
+                  }}
+                  className="relative w-20 h-20 sm:w-28 sm:h-28 rounded-full overflow-hidden border-2 border-zinc-700 shadow-inner group cursor-pointer bg-zinc-900 flex items-center justify-center"
+                  title="Change Cover Artwork (Camera / Gallery)"
+                >
+                  {currentTrack.coverArt ? (
+                    <img
+                      src={currentTrack.coverArt}
+                      alt={currentTrack.title}
+                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                        const fallback = e.currentTarget.nextElementSibling as HTMLElement;
+                        if (fallback) fallback.style.display = 'flex';
+                      }}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                    />
+                  ) : null}
+
+                  <div
+                    className={`w-full h-full flex items-center justify-center bg-zinc-900 ${
+                      currentTrack.coverArt ? 'hidden' : 'flex'
+                    }`}
+                  >
+                    <Music className="w-6 h-6 text-amber-400" />
+                  </div>
+
+                  {/* Hover Camera Overlay */}
+                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-white transition-opacity">
+                    <Camera className="w-5 h-5 text-amber-400 mb-0.5" />
+                    <span className="text-[8px] font-bold uppercase tracking-wider">Edit Artwork</span>
+                  </div>
+
+                  {/* Center spindle hole */}
+                  <div className="absolute inset-0 m-auto w-4 h-4 rounded-full bg-black border-2 border-zinc-500 shadow-md pointer-events-none" />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Style Switcher Pill */}
+          <div className="flex items-center gap-1 my-0.5 px-2 py-0.5 rounded-full bg-zinc-900/60 border border-zinc-800/80 text-[10px] text-zinc-400">
+            <button
+              onClick={() => setArtDisplayMode('cover')}
+              className={`px-2 py-0.5 rounded-full transition-colors ${
+                artDisplayMode === 'cover' ? 'bg-amber-500/20 text-amber-300 font-semibold' : 'hover:text-zinc-200'
+              }`}
+            >
+              Cover Art
+            </button>
+            <span>•</span>
+            <button
+              onClick={() => setArtDisplayMode('vinyl')}
+              className={`px-2 py-0.5 rounded-full transition-colors ${
+                artDisplayMode === 'vinyl' ? 'bg-amber-500/20 text-amber-300 font-semibold' : 'hover:text-zinc-200'
+              }`}
+            >
+              Vinyl Disc
+            </button>
           </div>
 
-          {/* Audio Visualizer Canvas - Made bigger and taller as requested */}
-          <div className="w-full max-w-sm sm:max-w-md h-12 sm:h-14 my-1 px-2 shrink-0">
+          {/* Audio Visualizer Canvas - Dynamic Bass & Beat Spectrum */}
+          <div className="w-full max-w-sm sm:max-w-md h-14 sm:h-16 my-1 px-2 shrink-0">
             <VisualizerCanvas
               isPlaying={isPlaying}
               type={visualizerMode}
               color={accentColorHex || '#f59e0b'}
-              barCount={30}
+              barCount={32}
               className="w-full h-full"
             />
           </div>
@@ -350,6 +453,17 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
             >
               {isKaraokeMode ? <MicOff className="w-4 h-4 text-rose-400" /> : <Mic2 className="w-4 h-4 text-rose-400" />}
               <span>{isKaraokeMode ? 'Karaoke ON' : 'Karaoke'}</span>
+            </button>
+
+            {/* Lyrics Mode Button (Placed beside Normal and Karaoke as requested) */}
+            <button
+              id="btn-full-lyrics-mode"
+              onClick={onOpenLyrics}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-amber-500/25 to-yellow-500/25 border border-amber-500/70 text-xs sm:text-sm font-bold text-amber-200 hover:text-white transition-all cursor-pointer shadow-sm hover:shadow-amber-500/20 active:scale-95"
+              title="Open Immersive Lyrics Mode"
+            >
+              <Subtitles className="w-4 h-4 text-amber-400" />
+              <span>Lyrics Mode</span>
             </button>
 
             {/* Ringtone Cutter Shortcut */}

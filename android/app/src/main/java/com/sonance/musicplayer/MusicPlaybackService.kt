@@ -12,26 +12,22 @@ import android.graphics.Bitmap
 import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
-import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 
 /**
- * Android Foreground Service with MediaSession and MediaStyle Notification
- * Ensures that when users lock their phone or pull down the notification shade:
- * - The active song appears with cover artwork, title, artist, and timeline scrubber
- * - Previous, Play/Pause, Next, Favorite, and Close buttons respond immediately
- * - Audio continues playing reliably in the background without Android OS killing it
+ * Foreground service managing media notifications, lock-screen controls,
+ * and audio focus across all Android devices and OS versions.
  */
 class MusicPlaybackService : Service() {
 
-    private val binder = LocalBinder()
     private var mediaSession: MediaSession? = null
     private var notificationManager: NotificationManager? = null
 
-    // Track current state
-    private var currentTitle: String = "Playing Music"
-    private var currentArtist: String = "Sonance Player"
+    // Track state
+    private var currentTitle: String = "Sonance Music"
+    private var currentArtist: String = "Unknown Artist"
     private var currentAlbum: String = "Music"
     private var currentSongId: Long = 0L
     private var currentAlbumId: Long = 0L
@@ -41,11 +37,7 @@ class MusicPlaybackService : Service() {
     private var durationMs: Long = 0L
     private var isFavorite: Boolean = false
 
-    inner class LocalBinder : Binder() {
-        fun getService(): MusicPlaybackService = this@MusicPlaybackService
-    }
-
-    override fun onBind(intent: Intent?): IBinder = binder
+    override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -65,55 +57,76 @@ class MusicPlaybackService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent != null) {
-            when (intent.action) {
-                ACTION_PREVIOUS -> onMediaAction("previous", 0)
-                ACTION_PLAY -> {
-                    isPlaying = true
-                    updatePlaybackState()
-                    updateNotification()
-                    onMediaAction("play", 0)
-                }
-                ACTION_PAUSE -> {
-                    isPlaying = false
-                    updatePlaybackState()
-                    updateNotification()
-                    onMediaAction("pause", 0)
-                }
-                ACTION_TOGGLE -> {
-                    val nextPlay = !isPlaying
-                    isPlaying = nextPlay
-                    updatePlaybackState()
-                    updateNotification()
-                    onMediaAction(if (nextPlay) "play" else "pause", 0)
-                }
-                ACTION_NEXT -> onMediaAction("next", 0)
-                ACTION_CLOSE -> {
-                    isPlaying = false
-                    updatePlaybackState()
-                    onMediaAction("close", 0)
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelf()
-                    return START_NOT_STICKY
-                }
-                ACTION_FAVORITE -> onMediaAction("favorite", 0)
-                ACTION_UPDATE -> {
-                    currentTitle = intent.getStringExtra(EXTRA_TITLE) ?: currentTitle
-                    currentArtist = intent.getStringExtra(EXTRA_ARTIST) ?: currentArtist
-                    currentAlbum = intent.getStringExtra(EXTRA_ALBUM) ?: currentAlbum
-                    currentSongId = intent.getLongExtra(EXTRA_SONG_ID, currentSongId)
-                    currentAlbumId = intent.getLongExtra(EXTRA_ALBUM_ID, currentAlbumId)
-                    currentCoverArt = intent.getStringExtra(EXTRA_COVER_ART) ?: currentCoverArt
-                    isPlaying = intent.getBooleanExtra(EXTRA_IS_PLAYING, isPlaying)
-                    currentPositionMs = intent.getLongExtra(EXTRA_POSITION, currentPositionMs)
-                    durationMs = intent.getLongExtra(EXTRA_DURATION, durationMs)
-                    isFavorite = intent.getBooleanExtra(EXTRA_IS_FAVORITE, isFavorite)
+            val action = intent.action
+            if (action == ACTION_UPDATE) {
+                val title = intent.getStringExtra(EXTRA_TITLE)
+                val artist = intent.getStringExtra(EXTRA_ARTIST)
+                val album = intent.getStringExtra(EXTRA_ALBUM)
+                val songId = intent.getLongExtra(EXTRA_SONG_ID, currentSongId)
+                val albumId = intent.getLongExtra(EXTRA_ALBUM_ID, currentAlbumId)
+                val coverArt = intent.getStringExtra(EXTRA_COVER_ART)
+                val isPlayingExtra = intent.getBooleanExtra(EXTRA_IS_PLAYING, this.isPlaying)
+                val pos = intent.getLongExtra(EXTRA_POSITION, currentPositionMs)
+                val dur = intent.getLongExtra(EXTRA_DURATION, 0L)
+                val isFav = intent.getBooleanExtra(EXTRA_IS_FAVORITE, isFavorite)
 
-                    updatePlaybackState()
-                    updateNotification()
-                }
+                applyUpdate(
+                    title = title ?: currentTitle,
+                    artist = artist ?: currentArtist,
+                    album = album ?: currentAlbum,
+                    songId = songId,
+                    albumId = albumId,
+                    coverArt = coverArt ?: currentCoverArt,
+                    isPlaying = isPlayingExtra,
+                    positionMs = pos,
+                    durationMs = dur,
+                    isFavorite = isFav
+                )
+            } else if (!action.isNullOrBlank()) {
+                processAction(action)
             }
         }
         return START_STICKY
+    }
+
+    fun processAction(action: String) {
+        when (action) {
+            ACTION_PREVIOUS -> {
+                onMediaAction("previous", 0)
+            }
+            ACTION_PLAY -> {
+                isPlaying = true
+                updatePlaybackState()
+                updateNotification()
+                onMediaAction("play", 0)
+            }
+            ACTION_PAUSE -> {
+                isPlaying = false
+                updatePlaybackState()
+                updateNotification()
+                onMediaAction("pause", 0)
+            }
+            ACTION_TOGGLE -> {
+                val nextPlay = !isPlaying
+                isPlaying = nextPlay
+                updatePlaybackState()
+                updateNotification()
+                onMediaAction(if (nextPlay) "play" else "pause", 0)
+            }
+            ACTION_NEXT -> {
+                onMediaAction("next", 0)
+            }
+            ACTION_CLOSE -> {
+                isPlaying = false
+                updatePlaybackState()
+                onMediaAction("close", 0)
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+            ACTION_FAVORITE -> {
+                onMediaAction("favorite", 0)
+            }
+        }
     }
 
     private fun createNotificationChannel() {
@@ -123,7 +136,7 @@ class MusicPlaybackService : Service() {
                 "Sonance Music Playback",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Active music playback controls on lock screen and notification bar"
+                description = "Shows now playing music track controls"
                 setShowBadge(false)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
@@ -133,27 +146,26 @@ class MusicPlaybackService : Service() {
 
     private fun initMediaSession() {
         mediaSession = MediaSession(this, "SonanceMediaSession").apply {
+            setFlags(
+                MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or
+                        MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS
+            )
+
             setCallback(object : MediaSession.Callback() {
                 override fun onPlay() {
-                    isPlaying = true
-                    updatePlaybackState()
-                    updateNotification()
-                    onMediaAction("play", 0)
+                    processAction(ACTION_PLAY)
                 }
 
                 override fun onPause() {
-                    isPlaying = false
-                    updatePlaybackState()
-                    updateNotification()
-                    onMediaAction("pause", 0)
+                    processAction(ACTION_PAUSE)
                 }
 
                 override fun onSkipToNext() {
-                    onMediaAction("next", 0)
+                    processAction(ACTION_NEXT)
                 }
 
                 override fun onSkipToPrevious() {
-                    onMediaAction("previous", 0)
+                    processAction(ACTION_PREVIOUS)
                 }
 
                 override fun onSeekTo(pos: Long) {
@@ -163,15 +175,47 @@ class MusicPlaybackService : Service() {
                 }
 
                 override fun onStop() {
-                    isPlaying = false
-                    updatePlaybackState()
-                    onMediaAction("close", 0)
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelf()
+                    processAction(ACTION_CLOSE)
                 }
             })
             isActive = true
         }
+    }
+
+    fun applyUpdate(
+        title: String,
+        artist: String,
+        album: String?,
+        songId: Long,
+        albumId: Long,
+        coverArt: String?,
+        isPlaying: Boolean,
+        positionMs: Long,
+        durationMs: Long,
+        isFavorite: Boolean
+    ) {
+        if (!title.isNullOrBlank()) this.currentTitle = title
+        if (!artist.isNullOrBlank()) this.currentArtist = artist
+        if (!album.isNullOrBlank()) this.currentAlbum = album
+        if (songId > 0) this.currentSongId = songId
+        if (albumId > 0) this.currentAlbumId = albumId
+        if (!coverArt.isNullOrBlank()) this.currentCoverArt = coverArt
+        this.isPlaying = isPlaying
+        if (positionMs >= 0) this.currentPositionMs = positionMs
+
+        val normalizedDuration = when {
+            durationMs in 1..9999 -> durationMs * 1000L
+            durationMs > 10_000_000L -> durationMs / 1000L
+            durationMs >= 10000L -> durationMs
+            else -> 0L
+        }
+        if (normalizedDuration > 0) {
+            this.durationMs = normalizedDuration
+        }
+        this.isFavorite = isFavorite
+
+        updatePlaybackState()
+        updateNotification()
     }
 
     private fun updatePlaybackState() {
@@ -187,22 +231,25 @@ class MusicPlaybackService : Service() {
 
         val playbackState = PlaybackState.Builder()
             .setActions(actions)
-            .setState(state, currentPositionMs, if (isPlaying) 1.0f else 0.0f)
+            .setState(state, currentPositionMs, if (isPlaying) 1.0f else 0.0f, SystemClock.elapsedRealtime())
             .build()
         session.setPlaybackState(playbackState)
 
-        // Metadata for Android lock screen widget (title, artist, album, duration, and artwork)
-        val artworkBitmap = ArtworkHelper.getArtworkBitmap(this, currentSongId, currentAlbumId, currentCoverArt)
+        // Metadata for Android lock screen widget and notification progress line
+        val artworkBitmap = ArtworkHelper.getArtworkBitmap(this, currentSongId, currentAlbumId, currentCoverArt, currentTitle)
+        val effectiveDuration = when {
+            durationMs in 1..9999 -> durationMs * 1000L
+            durationMs > 10_000_000L -> durationMs / 1000L
+            durationMs >= 10000L -> durationMs
+            else -> 0L
+        }
         val metadataBuilder = MediaMetadata.Builder()
             .putString(MediaMetadata.METADATA_KEY_TITLE, currentTitle)
             .putString(MediaMetadata.METADATA_KEY_ARTIST, currentArtist)
             .putString(MediaMetadata.METADATA_KEY_ALBUM, currentAlbum)
-            .putLong(MediaMetadata.METADATA_KEY_DURATION, if (durationMs > 0) durationMs else 0L)
-
-        if (artworkBitmap != null) {
-            metadataBuilder.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, artworkBitmap)
-            metadataBuilder.putBitmap(MediaMetadata.METADATA_KEY_ART, artworkBitmap)
-        }
+            .putLong(MediaMetadata.METADATA_KEY_DURATION, effectiveDuration)
+            .putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, artworkBitmap)
+            .putBitmap(MediaMetadata.METADATA_KEY_ART, artworkBitmap)
 
         session.setMetadata(metadataBuilder.build())
     }
@@ -212,6 +259,7 @@ class MusicPlaybackService : Service() {
 
         val openAppIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            setPackage(packageName)
         }
         val pendingOpenApp = PendingIntent.getActivity(
             this,
@@ -220,7 +268,7 @@ class MusicPlaybackService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Action intents
+        // Action intents (Universal broadcast receiver compatible with all Android devices including Xiaomi/Redmi)
         val prevPending = createActionPendingIntent(ACTION_PREVIOUS, 1)
         val togglePending = createActionPendingIntent(ACTION_TOGGLE, 2)
         val nextPending = createActionPendingIntent(ACTION_NEXT, 3)
@@ -234,7 +282,7 @@ class MusicPlaybackService : Service() {
         }
         val playPauseTitle = if (isPlaying) "Pause" else "Play"
 
-        val artworkBitmap: Bitmap? = ArtworkHelper.getArtworkBitmap(this, currentSongId, currentAlbumId, currentCoverArt)
+        val artworkBitmap: Bitmap = ArtworkHelper.getArtworkBitmap(this, currentSongId, currentAlbumId, currentCoverArt, currentTitle)
 
         val mediaStyle = Notification.MediaStyle()
             .setMediaSession(session.sessionToken)
@@ -259,10 +307,7 @@ class MusicPlaybackService : Service() {
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setOngoing(isPlaying)
             .setShowWhen(false)
-
-        if (artworkBitmap != null) {
-            builder.setLargeIcon(artworkBitmap)
-        }
+            .setLargeIcon(artworkBitmap)
 
         // Action 0: Favorite (Heart)
         builder.addAction(
@@ -323,10 +368,11 @@ class MusicPlaybackService : Service() {
     }
 
     private fun createActionPendingIntent(action: String, requestCode: Int): PendingIntent {
-        val intent = Intent(this, MusicPlaybackService::class.java).apply {
+        val intent = Intent(this, MediaActionReceiver::class.java).apply {
             this.action = action
+            setPackage(packageName)
         }
-        return PendingIntent.getService(
+        return PendingIntent.getBroadcast(
             this,
             requestCode,
             intent,
@@ -365,6 +411,25 @@ class MusicPlaybackService : Service() {
         var instance: MusicPlaybackService? = null
         var actionListener: ((type: String, position: Long) -> Unit)? = null
 
+        fun handleAction(context: Context, action: String) {
+            val currentInstance = instance
+            if (currentInstance != null) {
+                currentInstance.processAction(action)
+            } else {
+                val intent = Intent(context, MusicPlaybackService::class.java).apply {
+                    this.action = action
+                    setPackage(context.packageName)
+                }
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(intent)
+                    } else {
+                        context.startService(intent)
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+
         fun update(
             context: Context,
             title: String,
@@ -378,6 +443,22 @@ class MusicPlaybackService : Service() {
             durationMs: Long,
             isFavorite: Boolean
         ) {
+            val currentInstance = instance
+            if (currentInstance != null) {
+                currentInstance.applyUpdate(
+                    title = title,
+                    artist = artist,
+                    album = album,
+                    songId = songId,
+                    albumId = albumId,
+                    coverArt = coverArt,
+                    isPlaying = isPlaying,
+                    positionMs = positionMs,
+                    durationMs = durationMs,
+                    isFavorite = isFavorite
+                )
+                return
+            }
             val intent = Intent(context, MusicPlaybackService::class.java).apply {
                 action = ACTION_UPDATE
                 putExtra(EXTRA_TITLE, title)
@@ -390,6 +471,7 @@ class MusicPlaybackService : Service() {
                 putExtra(EXTRA_POSITION, positionMs)
                 putExtra(EXTRA_DURATION, durationMs)
                 putExtra(EXTRA_IS_FAVORITE, isFavorite)
+                setPackage(context.packageName)
             }
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -406,6 +488,7 @@ class MusicPlaybackService : Service() {
             try {
                 val intent = Intent(context, MusicPlaybackService::class.java).apply {
                     action = ACTION_CLOSE
+                    setPackage(context.packageName)
                 }
                 context.startService(intent)
             } catch (_: Exception) {}

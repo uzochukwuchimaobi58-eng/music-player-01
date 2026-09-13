@@ -20,8 +20,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
-    <!-- Audio DSP & Hardware Equalizer (Bass Boost, 10-Band EQ, Karaoke) -->
+    <!-- Audio DSP & Hardware Equalizer (Bass Boost, 10-Band EQ, Karaoke, Hardware Visualizer) -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!-- Advanced Settings from Android App Info screen -->
     <!-- Display over other apps (Floating Mini Player / Floating Widget) -->
@@ -90,6 +91,11 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <receiver
+            android:name=".MediaActionReceiver"
+            android:enabled="true"
+            android:exported="false" />
     </application>
 
 </manifest>

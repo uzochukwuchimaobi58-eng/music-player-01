@@ -10,38 +10,69 @@ export interface ParsedLyricLine {
 export interface LyricsScanResult {
   lyrics: string;
   lines: ParsedLyricLine[];
-  source: 'embedded_metadata' | 'cached_lrc' | 'local_file' | 'audio_synced' | 'online_synced' | 'online_plain';
+  source: 'embedded_metadata' | 'cached_lrc' | 'local_file' | 'audio_synced' | 'online_synced' | 'online_plain' | 'offline_prompt';
   sourceLabel: string;
   filename?: string;
+  isOfflineNoData?: boolean;
 }
 
 const LRC_CACHE_PREFIX = 'track_lrc_cache_';
 
 /**
- * Strips noise, extensions, and tags from track titles for accurate online matching
+ * Strips noise, website watermarks, domain extensions, and tags from track titles for accurate online matching
  */
 export function cleanTrackTitle(rawTitle: string): string {
   if (!rawTitle) return '';
-  return rawTitle
-    .replace(/\.[a-z0-9]{2,4}$/i, '') // remove .mp3, .flac, .m4a
-    .replace(/[\(\[](?:official\s*(?:video|audio|music\s*video|lyric\s*video|hd|4k)?|lyrics?|remaster(?:ed)?|bonus\s*track|explicit|clean|audio|visualizer)[\)\]]/gi, '')
-    .replace(/\s*(?:ft\.?|feat\.?)\s+.*$/i, '')
-    .replace(/\s*-\s*(?:official\s*video|audio|lyrics?)$/i, '')
-    .replace(/[_]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  let cleaned = rawTitle;
+
+  // 1. Remove audio file extensions (.mp3, .flac, .m4a, .wav, .aac, .ogg)
+  cleaned = cleaned.replace(/\.[a-z0-9]{2,4}$/i, '');
+
+  // 2. Remove piped or dashed site watermarks, e.g. " | Trendyhiphop.com", " - Trendyhiphop.com", " // TrendyBeatz.com"
+  cleaned = cleaned.replace(/\s*(\||\/\/|--)\s*.*$/i, '');
+
+  // 3. Remove common African & global music download domain watermarks
+  cleaned = cleaned.replace(/\b(?:www\.)?[a-z0-9-]+\.(?:com|ng|net|org|co|io|xyz|info|biz|me|club|top|vip|cc|tv|gh|za|ke)\b/gi, '');
+  cleaned = cleaned.replace(/\b(?:trendyhiphop|naijaloaded|tooxclusive|justnaija|mp3bullet|waploaded|trendybeatz|netnaija|ghanasongs|fakaza|tubidy|val9ja|xclusivepop|9jaflavour|loadedclique|afrocharts|notjustok|yabaleftonline)\b/gi, '');
+
+  // 4. Remove bracketed / parenthetical noise: [Official Video], [Trendyhiphop], (Audio), (Lyrics), (Remastered)
+  cleaned = cleaned.replace(/[\(\[](?:official\s*(?:video|audio|music\s*video|lyric\s*video|hd|4k)?|lyrics?|remaster(?:ed)?|bonus\s*track|explicit|clean|audio|visualizer|download(?:ed)?|stream|exclusive|promo|snippet)[\)\]]/gi, '');
+  cleaned = cleaned.replace(/\[[^\]]*\b(?:com|net|org|mp3|download|trendy|naija|exclusive)\b[^\]]*\]/gi, '');
+  cleaned = cleaned.replace(/\([^\)]*\b(?:com|net|org|mp3|download|trendy|naija|exclusive)\b[^\)]*\)/gi, '');
+
+  // 5. Remove featured artists from title: "ft. Drake", "feat. Lil Wayne"
+  cleaned = cleaned.replace(/\s*(?:ft\.?|feat\.?|featuring)\s+.*$/i, '');
+
+  // 6. Remove trailing hyphens, "official video", "audio", "lyrics"
+  cleaned = cleaned.replace(/\s*-\s*(?:official\s*video|audio|lyrics?)$/i, '');
+
+  // 7. Remove track number prefixes: "01. ", "01 - ", "1 - "
+  cleaned = cleaned.replace(/^\d{1,3}\s*[\.\-_]\s*/, '');
+
+  // 8. If title has "Artist - Song", extract song title
+  if (cleaned.includes(' - ')) {
+    const parts = cleaned.split(' - ');
+    if (parts.length === 2 && parts[1].trim().length > 0) {
+      cleaned = parts[1].trim();
+    }
+  }
+
+  return cleaned.replace(/[_]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 /**
- * Strips featured artists and secondary names to match primary artist
+ * Strips featured artists, website handles, and secondary names to match primary artist
  */
 export function cleanTrackArtist(rawArtist: string): string {
   if (!rawArtist || rawArtist.toLowerCase() === 'unknown artist') return '';
-  return rawArtist
-    .replace(/\s*(?:ft\.?|feat\.?)\s+.*$/i, '')
-    .replace(/[_]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  let cleaned = rawArtist;
+  // Remove social / domain handles like @trendyhiphop_com, trendyhiphop.com
+  cleaned = cleaned.replace(/^@[\w\.-]+/i, '');
+  cleaned = cleaned.replace(/\b(?:www\.)?[a-z0-9-]+\.(?:com|ng|net|org|co|io|xyz|info)\b/gi, '');
+  cleaned = cleaned.replace(/\b(?:trendyhiphop|naijaloaded|tooxclusive|justnaija|mp3bullet|waploaded|trendybeatz|netnaija|fakaza|tubidy)\b/gi, '');
+  cleaned = cleaned.replace(/\s*(?:ft\.?|feat\.?|featuring)\s+.*$/i, '');
+  cleaned = cleaned.replace(/[_]/g, ' ').replace(/\s+/g, ' ').trim();
+  return cleaned;
 }
 
 /**
@@ -83,24 +114,34 @@ export async function fetchOnlineLyrics(
       }
     }
 
-    // 2. Fuzzy LRCLIB search query
-    const searchQuery = cleanArtist ? `${cleanArtist} ${cleanTitle}` : cleanTitle;
-    const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(searchQuery)}`;
-    const searchRes = await fetch(searchUrl, { signal: controller.signal });
-    if (searchRes.ok) {
-      const results = await searchRes.json();
-      if (Array.isArray(results) && results.length > 0) {
-        // Prefer item with syncedLyrics
-        const withSynced = results.find((r) => r.syncedLyrics && r.syncedLyrics.trim().length > 0);
-        if (withSynced) {
-          clearTimeout(timeoutId);
-          return { lyrics: withSynced.syncedLyrics, synced: true };
+    // 2. Fuzzy LRCLIB search query with smart multi-step query fallback
+    const searchQueries = [
+      cleanArtist ? `${cleanArtist} ${cleanTitle}` : cleanTitle,
+      cleanTitle,
+    ];
+
+    for (const q of searchQueries) {
+      try {
+        const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(q)}`;
+        const searchRes = await fetch(searchUrl, { signal: controller.signal });
+        if (searchRes.ok) {
+          const results = await searchRes.json();
+          if (Array.isArray(results) && results.length > 0) {
+            // Prefer item with syncedLyrics
+            const withSynced = results.find((r) => r.syncedLyrics && r.syncedLyrics.trim().length > 0);
+            if (withSynced) {
+              clearTimeout(timeoutId);
+              return { lyrics: withSynced.syncedLyrics, synced: true };
+            }
+            const withPlain = results.find((r) => r.plainLyrics && r.plainLyrics.trim().length > 0);
+            if (withPlain) {
+              clearTimeout(timeoutId);
+              return { lyrics: withPlain.plainLyrics, synced: false };
+            }
+          }
         }
-        const withPlain = results.find((r) => r.plainLyrics && r.plainLyrics.trim().length > 0);
-        if (withPlain) {
-          clearTimeout(timeoutId);
-          return { lyrics: withPlain.plainLyrics, synced: false };
-        }
+      } catch (e) {
+        // try next query
       }
     }
 
@@ -174,9 +215,14 @@ export function parseLrcLyrics(rawLyrics: string, trackDuration: number = 180): 
   // If the lyrics had no timestamps at all, synthesize proportional timestamps based on song duration
   if (!hasTimestampedLines && lines.length > 0) {
     const validLines = lines.filter((l) => l.text.length > 0);
-    const interval = Math.max(4, Math.floor(trackDuration / (validLines.length + 1)));
+    const totalDuration = Math.max(30, trackDuration);
+    // Natural intro buffer (3-5 seconds) before first line sings
+    const introBuffer = Math.min(4, totalDuration * 0.05);
+    const usableTime = Math.max(10, totalDuration - introBuffer - 5);
+    const step = usableTime / Math.max(1, validLines.length);
+
     return validLines.map((l, idx) => ({
-      time: Math.min(trackDuration - 2, (idx + 1) * interval),
+      time: Math.round((introBuffer + idx * step) * 10) / 10,
       text: l.text,
     }));
   }
@@ -273,7 +319,19 @@ export async function autoScanTrackLyrics(
     console.debug('Offline blob metadata check:', err);
   }
 
-  // 5. Check Online Lyrics Database (LRCLIB Synchronized LRC & Lyrics.ovh)
+  // 5. If device is offline (no mobile data or wifi) and no local lyrics were found, return offline prompt
+  const isDeviceOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+  if (isDeviceOffline) {
+    return {
+      lyrics: '',
+      lines: [],
+      source: 'offline_prompt',
+      sourceLabel: 'Offline (No Mobile Data / Network)',
+      isOfflineNoData: true,
+    };
+  }
+
+  // 6. Check Online Lyrics Database (LRCLIB Synchronized LRC & Lyrics.ovh)
   try {
     const onlineResult = await fetchOnlineLyrics(track.title, track.artist, track.duration);
     if (onlineResult && onlineResult.lyrics.trim().length > 0) {
@@ -308,7 +366,7 @@ export async function autoScanTrackLyrics(
     console.debug('Online lyrics auto-scan notice:', err);
   }
 
-  // 6. Intelligent Synchronized Waveform & Tempo Cadence Scan fallback
+  // 7. Intelligent Synchronized Waveform & Tempo Cadence Scan fallback
   const songDur = track.duration || 180;
   const interval = Math.max(7, Math.floor(songDur / 9));
 

@@ -80,7 +80,8 @@ export type ActiveView =
   | 'recent_add'
   | 'most_play'
   | 'playlist_detail'
-  | 'drive_mode';
+  | 'drive_mode'
+  | 'lyrics_mode';
 
 export interface EqualizerSettings {
   enabled: boolean;

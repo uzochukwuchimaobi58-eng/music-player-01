@@ -54,6 +54,7 @@ import { ScanLibraryModal } from './components/ScanLibraryModal';
 import { PlaylistModal } from './components/PlaylistModal';
 import { SleepTimerModal } from './components/SleepTimerModal';
 import { DriveModeView } from './components/DriveModeView';
+import { LyricsModeView } from './components/LyricsModeView';
 import { LyricsModal } from './components/LyricsModal';
 import { QueueModal } from './components/QueueModal';
 import { ThemeModal } from './components/ThemeModal';
@@ -273,7 +274,7 @@ export default function App() {
   const handleSeekRef = useRef<(sec: number) => void>(() => {});
   const handleToggleFavoriteRef = useRef<(id: string) => void>(() => {});
   const handleTrackEndRef = useRef<() => void>(() => {});
-  const handleNativeAutoAdvancedRef = useRef<(trackId: string) => void>(() => {});
+  const handleNativeAutoAdvancedRef = useRef<(trackId: string, index?: number, artwork?: string) => void>(() => {});
 
   // Derive Current Track
   const currentTrack = useMemo(() => {
@@ -534,12 +535,16 @@ export default function App() {
               }
               break;
             case 'next':
-              if (!Capacitor.isNativePlatform()) {
+              if (event.handledByNative) {
+                setIsPlaying(true);
+              } else {
                 handleNextTrackRef.current(true);
               }
               break;
             case 'previous':
-              if (!Capacitor.isNativePlatform()) {
+              if (event.handledByNative) {
+                setIsPlaying(true);
+              } else {
                 handlePrevTrackRef.current();
               }
               break;
@@ -562,8 +567,8 @@ export default function App() {
         });
 
         autoAdvSub = await MusicLibrary.addListener('trackAutoAdvanced', (event) => {
-          if (event && event.id) {
-            handleNativeAutoAdvancedRef.current(event.id);
+          if (event) {
+            handleNativeAutoAdvancedRef.current(event.id || '', event.index, event.artwork);
           }
         });
       } catch (e) {
@@ -915,9 +920,9 @@ export default function App() {
       handleTrackEndRef.current();
     });
 
-    const unsubAutoAdvanced = audioEngine.onTrackAutoAdvanced((evt) => {
-      if (evt && evt.id) {
-        handleNativeAutoAdvancedRef.current(evt.id);
+    const unsubAutoAdvanced = audioEngine.onTrackAutoAdvanced((evt: any) => {
+      if (evt) {
+        handleNativeAutoAdvancedRef.current(evt.id || '', evt.index, evt.artwork);
       }
     });
 
@@ -1006,6 +1011,10 @@ export default function App() {
 
     setActiveQueue(queueToUse);
     setCurrentTrackId(track.id);
+    setCurrentTime(0);
+    if (track.duration && track.duration > 0) {
+      setDuration(track.duration);
+    }
     if (autoPlay) {
       setIsPlaying(true);
     }
@@ -1050,19 +1059,12 @@ export default function App() {
       registerTrackPlay(track.id);
     });
 
-    // Background auto-fetch synchronized lyrics if missing
+    // Background auto-fetch synchronized lyrics whenever any song starts playing if missing
     if (!track.lyrics || track.lyrics.trim().length === 0) {
       autoScanTrackLyrics(track)
         .then((res) => {
-          if (res && res.lyrics && res.source !== 'audio_synced') {
-            setTracks((prev) => {
-              const updated = prev.map((t) => (t.id === track.id ? { ...t, lyrics: res.lyrics } : t));
-              saveStoredTracks(updated);
-              return updated;
-            });
-            setActiveQueue((prev) =>
-              prev.map((t) => (t.id === track.id ? { ...t, lyrics: res.lyrics } : t))
-            );
+          if (res && res.lyrics && res.lyrics.trim().length > 0) {
+            handleUpdateLyrics(track.id, res.lyrics);
           }
         })
         .catch(() => {});
@@ -1070,14 +1072,26 @@ export default function App() {
   };
 
   const handleTogglePlay = async () => {
-    if (!currentTrack) return;
+    // If no currentTrack selected or library was just opened, automatically select the first track
+    const trackToPlay = currentTrack || (tracks.length > 0 ? tracks[0] : null);
+    if (!trackToPlay) return;
 
     if (isPlaying) {
       audioEngine.pause(playerSettings.playPauseFade);
       setIsPlaying(false);
       setPausedNextPressCount(0);
     } else {
-      await audioEngine.play(playerSettings.playPauseFade);
+      // If audio engine has not loaded the audio yet or starting fresh on app entry,
+      // load and play the first track immediately
+      if (!audioEngine.getCurrentTrack() || currentTime === 0) {
+        await loadAndPlayTrack(trackToPlay, true, activeQueue.length > 0 ? activeQueue : tracks);
+      } else {
+        try {
+          await audioEngine.play(playerSettings.playPauseFade);
+        } catch {
+          await loadAndPlayTrack(trackToPlay, true, activeQueue.length > 0 ? activeQueue : tracks);
+        }
+      }
       setIsPlaying(true);
       setPausedNextPressCount(0);
     }
@@ -1119,20 +1133,9 @@ export default function App() {
     const nextTrack = effectiveQueue[nextIndex];
     if (!nextTrack) return;
 
-    // When paused and not forcing play:
-    // First tap on next cues track without playing; pressing another next starts playback
-    if (!isPlaying && !forcePlay) {
-      if (pausedNextPressCount === 0) {
-        setPausedNextPressCount(1);
-        loadAndPlayTrack(nextTrack, false, effectiveQueue);
-      } else {
-        setPausedNextPressCount(0);
-        loadAndPlayTrack(nextTrack, true, effectiveQueue);
-      }
-    } else {
-      setPausedNextPressCount(0);
-      loadAndPlayTrack(nextTrack, true, effectiveQueue);
-    }
+    // Single press immediately plays next song with zero delay
+    setPausedNextPressCount(0);
+    loadAndPlayTrack(nextTrack, true, effectiveQueue);
   };
   handleNextTrackRef.current = handleNextTrack;
 
@@ -1156,13 +1159,9 @@ export default function App() {
     const prevTrack = effectiveQueue[prevIndex];
     if (!prevTrack) return;
 
-    // When paused, navigating back cues track without playing
-    if (!isPlaying) {
-      setPausedNextPressCount(0);
-      loadAndPlayTrack(prevTrack, false, effectiveQueue);
-    } else {
-      loadAndPlayTrack(prevTrack, true, effectiveQueue);
-    }
+    // Single press immediately plays previous song with zero delay
+    setPausedNextPressCount(0);
+    loadAndPlayTrack(prevTrack, true, effectiveQueue);
   };
   handlePrevTrackRef.current = handlePrevTrack;
 
@@ -1211,13 +1210,26 @@ export default function App() {
   handleTrackEndRef.current = handleTrackEnd;
 
   // Native auto-advance handler from background Android service
-  const handleNativeAutoAdvanced = (trackId: string) => {
-    const foundTrack =
-      tracks.find((t) => t.id === trackId || t.id === `native-${trackId}` || t.id.includes(trackId)) ||
-      activeQueue.find((t) => t.id === trackId || t.id === `native-${trackId}` || t.id.includes(trackId));
+  const handleNativeAutoAdvanced = (trackId: string, index?: number, artwork?: string) => {
+    const cleanId = trackId ? trackId.replace('native-', '') : '';
+    let foundTrack =
+      tracks.find((t) => t.id === trackId || (cleanId && (t.id === `native-${cleanId}` || t.id.endsWith(cleanId)))) ||
+      activeQueue.find((t) => t.id === trackId || (cleanId && (t.id === `native-${cleanId}` || t.id.endsWith(cleanId))));
+
+    if (!foundTrack && typeof index === 'number' && index >= 0) {
+      const q = activeQueue.length > 0 ? activeQueue : tracks;
+      foundTrack = q[index];
+    }
 
     if (foundTrack) {
+      if (artwork && (!foundTrack.coverArt || foundTrack.coverArt.includes('unsplash'))) {
+        foundTrack.coverArt = artwork.startsWith('/') || artwork.startsWith('file://') ? Capacitor.convertFileSrc(artwork) : artwork;
+      }
       setCurrentTrackId(foundTrack.id);
+      setCurrentTime(0);
+      if (foundTrack.duration && foundTrack.duration > 0) {
+        setDuration(foundTrack.duration);
+      }
       setIsPlaying(true);
       registerTrackPlay(foundTrack.id);
     }
@@ -1513,7 +1525,12 @@ export default function App() {
   };
 
   const handleUpdateLyrics = (trackId: string, newLyrics: string) => {
-    setTracks((prev) =>
+    setTracks((prev) => {
+      const updated = prev.map((t) => (t.id === trackId ? { ...t, lyrics: newLyrics } : t));
+      saveStoredTracks(updated);
+      return updated;
+    });
+    setActiveQueue((prev) =>
       prev.map((t) => (t.id === trackId ? { ...t, lyrics: newLyrics } : t))
     );
   };
@@ -1582,6 +1599,8 @@ export default function App() {
         return pl ? pl.name : 'Playlist';
       case 'drive_mode':
         return 'Drive Mode';
+      case 'lyrics_mode':
+        return 'Lyrics Mode';
       default:
         return 'Sonance Music';
     }
@@ -1643,6 +1662,21 @@ export default function App() {
           onToggleRepeat={handleToggleRepeat}
           onVolumeChange={handleVolumeChange}
           onExitDriveMode={() => setActiveView('home')}
+        />
+      ) : activeView === 'lyrics_mode' ? (
+        <LyricsModeView
+          currentTrack={currentTrack}
+          isPlaying={isPlaying}
+          currentTime={currentTime}
+          duration={duration}
+          onTogglePlay={handleTogglePlay}
+          onNextTrack={handleNextTrack}
+          onPrevTrack={handlePrevTrack}
+          onSeek={handleSeek}
+          onToggleFavorite={handleToggleFavorite}
+          onExitLyricsMode={() => setActiveView('home')}
+          onUpdateLyrics={handleUpdateLyrics}
+          accentColorHex={activeThemeConfig.accentColor}
         />
       ) : (
         <>
@@ -1826,6 +1860,11 @@ export default function App() {
             onEnterDriveMode={() => {
               setIsDriveSafetyModalOpen(true);
             }}
+            onEnterLyricsMode={() => {
+              setActiveView('lyrics_mode');
+              setIsSidebarOpen(false);
+              setIsFullPlayerOpen(false);
+            }}
             onOpenWebBrowser={() => setIsWebBrowserOpen(true)}
             onOpenWidgetModal={() => setIsWidgetOpen(true)}
             onOpenHiddenFilesModal={() => setIsHiddenFilesOpen(true)}
@@ -1886,12 +1925,13 @@ export default function App() {
             onOpenEqualizer={() => setIsEqOpen(true)}
             onOpenSleepTimer={() => setIsSleepTimerOpen(true)}
             onOpenLyrics={() => {
-              setLyricsTrack(currentTrack);
-              setIsLyricsOpen(true);
+              setActiveView('lyrics_mode');
+              setIsFullPlayerOpen(false);
             }}
             onOpenQueue={() => setIsQueueOpen(true)}
             onOpenArtwork={(track) => setArtworkModalTrack(track)}
             onOpenTrackActions={(track) => setActionMenuTrack(track)}
+            onUpdateLyrics={handleUpdateLyrics}
           />
 
           {/* 10-Band Equalizer Modal */}

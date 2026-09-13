@@ -6,6 +6,7 @@ import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.media.audiofx.BassBoost
 import android.media.audiofx.Equalizer
+import android.media.audiofx.Visualizer
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -42,6 +43,9 @@ class PlaybackManager(private val context: Context) {
     // Native Audio Effects for Karaoke & Beat Instrumental
     private var equalizer: Equalizer? = null
     private var bassBoost: BassBoost? = null
+    private var visualizer: Visualizer? = null
+    @Volatile
+    private var currentFft: ByteArray? = null
 
     private var isKaraokeActive: Boolean = false
     private var isStemMixActive: Boolean = false
@@ -115,6 +119,9 @@ class PlaybackManager(private val context: Context) {
                 Uri.parse(uriString)
             }
             !uriString.isNullOrBlank() && uriString.startsWith("file://") -> {
+                Uri.parse(uriString)
+            }
+            !uriString.isNullOrBlank() && (uriString.startsWith("http://") || uriString.startsWith("https://")) -> {
                 Uri.parse(uriString)
             }
             !uriString.isNullOrBlank() && (uriString.startsWith("/") || File(uriString).exists()) -> {
@@ -278,6 +285,24 @@ class PlaybackManager(private val context: Context) {
                 enabled = true
             }
             applyAudioEffects()
+
+            // Initialize hardware Visualizer to capture live music spectrum & bass
+            try {
+                visualizer = Visualizer(sessionId).apply {
+                    captureSize = Visualizer.getCaptureSizeRange()[1].coerceAtMost(128)
+                    setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
+                        override fun onWaveFormDataCapture(v: Visualizer?, waveform: ByteArray?, sr: Int) {}
+                        override fun onFftDataCapture(v: Visualizer?, fft: ByteArray?, sr: Int) {
+                            if (fft != null) {
+                                currentFft = fft
+                            }
+                        }
+                    }, Visualizer.getMaxCaptureRate() / 2, false, true)
+                    enabled = true
+                }
+            } catch (ve: Exception) {
+                android.util.Log.w("PlaybackManager", "Visualizer hardware initialization note: ${ve.message}")
+            }
         } catch (e: Exception) {
             android.util.Log.w("PlaybackManager", "setupAudioEffects on session $sessionId failed, trying fallback to session 0: $e")
             try {
@@ -292,6 +317,13 @@ class PlaybackManager(private val context: Context) {
 
     private fun releaseAudioEffects() {
         try {
+            visualizer?.enabled = false
+            visualizer?.release()
+        } catch (_: Exception) {}
+        visualizer = null
+        currentFft = null
+
+        try {
             equalizer?.release()
         } catch (_: Exception) {}
         equalizer = null
@@ -301,6 +333,8 @@ class PlaybackManager(private val context: Context) {
         } catch (_: Exception) {}
         bassBoost = null
     }
+
+    fun getLatestFft(): ByteArray? = currentFft
 
     fun applyAudioEffects() {
         val eq = equalizer ?: return
@@ -487,7 +521,7 @@ class PlaybackManager(private val context: Context) {
         if (currentQueueIndex == -1) return 0
         val next = currentQueueIndex + 1
         if (next >= nativeQueue.size) {
-            return if (repeatMode == "all") 0 else -1
+            return 0
         }
         return next
     }

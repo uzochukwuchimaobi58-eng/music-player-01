@@ -73,7 +73,7 @@ export async function recordException(
       timestamp: new Date().toISOString(),
       userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'Unknown',
       url: typeof window !== 'undefined' ? window.location.href : 'Unknown',
-      appVersion: '1.0.2',
+      appVersion: '1.0.7',
       breadcrumbs: [...breadcrumbsBuffer],
       metadata: {
         ...metadata,

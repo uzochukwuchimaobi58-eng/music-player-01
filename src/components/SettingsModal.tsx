@@ -718,6 +718,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </button>
             </div>
           </div>
+
+          <div className="text-center pt-2">
+            <p className="text-[11px] text-zinc-500 font-medium">Sonance Music • Version 1.0.7 (Build 8)</p>
+          </div>
         </div>
       </div>
 

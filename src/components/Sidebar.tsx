@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ChevronRight,
   Music2,
+  Subtitles,
 } from 'lucide-react';
 import { RepeatMode, AppTheme, Playlist, AffiliateProduct } from '../types';
 import { getThemeConfig } from '../data/themes';
@@ -33,6 +34,7 @@ interface SidebarProps {
   onOpenRingtoneTrimmer?: () => void;
   onOpenProModal?: () => void;
   onEnterDriveMode: () => void;
+  onEnterLyricsMode?: () => void;
   onOpenWebBrowser?: () => void;
   onOpenWidgetModal?: () => void;
   onOpenHiddenFilesModal?: () => void;
@@ -60,6 +62,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenThemeModal,
   onOpenSettings,
   onEnterDriveMode,
+  onEnterLyricsMode,
   onOpenWebBrowser,
   onOpenWidgetModal,
   repeatMode,
@@ -331,7 +334,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </button>
 
-          {/* 10. Settings */}
+          {/* 10. Lyrics mode (Placed after Drive mode as requested) */}
+          <button
+            id="menu-lyrics-mode"
+            onClick={() => handleItemClick(onEnterLyricsMode)}
+            className="w-full flex items-center px-3 py-3 rounded-lg hover:bg-zinc-800/60 active:bg-zinc-800 transition-colors text-left cursor-pointer group"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-6 h-6 flex items-center justify-center text-amber-400 group-hover:text-amber-300">
+                <Subtitles className="w-5 h-5 stroke-[2]" />
+              </div>
+              <span className="text-sm font-normal text-zinc-200 group-hover:text-white">
+                Lyrics mode
+              </span>
+            </div>
+          </button>
+
+          {/* 11. Settings */}
           <button
             id="menu-settings"
             onClick={() => handleItemClick(onOpenSettings)}

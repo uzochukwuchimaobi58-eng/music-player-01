@@ -22,6 +22,7 @@ export interface PlaybackErrorEvent {
 export interface MediaActionEvent {
   type: 'play' | 'pause' | 'next' | 'previous' | 'seekTo' | 'close' | 'favorite';
   position?: number;
+  handledByNative?: boolean;
 }
 
 export interface TrackAutoAdvancedEvent {
@@ -29,6 +30,8 @@ export interface TrackAutoAdvancedEvent {
   index: number;
   title: string;
   artist: string;
+  duration?: number;
+  artwork?: string;
 }
 
 export interface NativeQueueItem {
@@ -99,6 +102,7 @@ export interface MusicLibraryPlugin {
     currentArtist?: string;
   }>;
   getArtwork?(options: { songId?: string; uri?: string; albumId?: string }): Promise<{ artwork: string | null }>;
+  saveArtworkToInternalStorage?(options: { songId?: string; albumId?: string; data: string }): Promise<{ filePath: string; success: boolean }>;
   setKaraokeMode(options: { enabled: boolean; vocalAttenuationPercent?: number }): Promise<void>;
   setPlaybackRate(options: { rate: number }): Promise<void>;
   setStemMix(options: { vocalLevel: number; beatBoost: number; bassLevel: number; instrumentalLevel: number }): Promise<void>;
@@ -108,6 +112,7 @@ export interface MusicLibraryPlugin {
   setAsRingtone(options: { uri?: string; id?: string; title?: string }): Promise<{ success: boolean; uri?: string; title?: string; message?: string }>;
   minimizeApp(): Promise<void>;
   exitApp(): Promise<void>;
+  getVisualizerWaveform(): Promise<{ data: number[] }>;
   addListener(
     eventName: 'playbackStateChange',
     listenerFunc: (state: PlaybackStateEvent) => void
@@ -236,6 +241,10 @@ export class MusicLibraryWeb extends WebPlugin implements MusicLibraryPlugin {
 
   async exitApp(): Promise<void> {
     // No-op on web
+  }
+
+  async getVisualizerWaveform(): Promise<{ data: number[] }> {
+    return { data: [] };
   }
 }
 

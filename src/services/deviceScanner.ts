@@ -430,6 +430,11 @@ export function convertNativeSongToTrack(s: Song): Track {
   const folderName = s.folder || s.album || 'Device Music';
   const sizeStr = s.fileSize ? `${(s.fileSize / (1024 * 1024)).toFixed(1)} MB` : undefined;
 
+  let resolvedArtwork = s.artwork || (s as any).artworkPath || '';
+  if (resolvedArtwork && (resolvedArtwork.startsWith('/') || resolvedArtwork.startsWith('file://'))) {
+    resolvedArtwork = Capacitor.convertFileSrc(resolvedArtwork);
+  }
+
   return {
     id: `native-${s.id}`,
     title: s.title || 'Unknown Title',
@@ -437,7 +442,7 @@ export function convertNativeSongToTrack(s: Song): Track {
     album: s.album || 'Unknown Album',
     duration: durationSec,
     url: s.uri,
-    coverArt: s.artwork || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&auto=format&fit=crop&q=80',
+    coverArt: resolvedArtwork || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&auto=format&fit=crop&q=80',
     folder: folderName,
     isFavorite: false,
     playCount: 0,

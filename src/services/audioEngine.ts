@@ -35,6 +35,20 @@ class AudioEngineService {
   private lastCurrentTime: number = 0;
   private lastDuration: number = 0;
   private currentPlaybackRate: number = 1.0;
+  private currentTrack: Track | null = null;
+  private _isPlaying: boolean = false;
+  private nativeFftData: number[] = [];
+  private fftPollInterval: ReturnType<typeof setInterval> | null = null;
+
+  public get isPlaying(): boolean {
+    if (this.isNative) {
+      return this._isPlaying;
+    }
+    return Boolean(
+      this._isPlaying ||
+      (this.audioElement && !this.audioElement.paused && !this.audioElement.ended && this.audioElement.readyState > 1)
+    );
+  }
 
   // Safe parameter ramping to completely eliminate audio clicks/crackles
   private rampParam(param: AudioParam | null | undefined, target: number, duration: number = 0.04) {
@@ -84,18 +98,21 @@ class AudioEngineService {
 
       this.audioElement.addEventListener('play', () => {
         if (!this.isNative) {
+          this._isPlaying = true;
           this.stateChangeListeners.forEach((cb) => cb(true));
         }
       });
 
       this.audioElement.addEventListener('pause', () => {
         if (!this.isNative) {
+          this._isPlaying = false;
           this.stateChangeListeners.forEach((cb) => cb(false));
         }
       });
 
       this.audioElement.addEventListener('ended', () => {
         if (!this.isNative) {
+          this._isPlaying = false;
           this.trackEndListeners.forEach((cb) => cb());
         }
       });
@@ -215,23 +232,36 @@ class AudioEngineService {
       await MusicLibrary.addListener('playbackStateChange', (state) => {
         if (this.isNative) {
           const isPlaying = state.status === 'playing';
+          this._isPlaying = isPlaying;
+          if (isPlaying) {
+            this.startNativeVisualizerPolling();
+          } else {
+            this.stopNativeVisualizerPolling();
+          }
           if (state.duration && state.duration > 0) {
             this.lastDuration = state.duration / 1000;
           }
           if (state.position !== undefined) {
             this.lastCurrentTime = state.position / 1000;
           }
+          this.timeUpdateListeners.forEach((cb) => cb(this.lastCurrentTime, this.lastDuration));
           this.stateChangeListeners.forEach((cb) => cb(isPlaying));
         }
       });
 
       await MusicLibrary.addListener('playbackCompleted', () => {
         if (this.isNative) {
+          this.stopNativeVisualizerPolling();
           this.trackEndListeners.forEach((cb) => cb());
         }
       });
 
       await MusicLibrary.addListener('trackAutoAdvanced', (event) => {
+        if (event && event.duration && event.duration > 0) {
+          this.lastDuration = event.duration / 1000;
+          this.lastCurrentTime = 0;
+          this.timeUpdateListeners.forEach((cb) => cb(0, this.lastDuration));
+        }
         this.trackAutoAdvancedListeners.forEach((cb) => cb(event));
       });
 
@@ -241,6 +271,26 @@ class AudioEngineService {
     } catch (e) {
       console.debug('Native listeners not supported or failed to bind:', e);
     }
+  }
+
+  private startNativeVisualizerPolling() {
+    if (this.fftPollInterval) return;
+    this.fftPollInterval = setInterval(async () => {
+      try {
+        const res = await MusicLibrary.getVisualizerWaveform();
+        if (res && res.data && res.data.length > 0) {
+          this.nativeFftData = res.data;
+        }
+      } catch {}
+    }, 60);
+  }
+
+  private stopNativeVisualizerPolling() {
+    if (this.fftPollInterval) {
+      clearInterval(this.fftPollInterval);
+      this.fftPollInterval = null;
+    }
+    this.nativeFftData = [];
   }
 
   public async resumeContext() {
@@ -265,6 +315,10 @@ class AudioEngineService {
     return this.analyser;
   }
 
+  public getCurrentTrack(): Track | null {
+    return this.currentTrack;
+  }
+
   public async loadTrack(
     url: string,
     track?: Track,
@@ -275,15 +329,20 @@ class AudioEngineService {
       isShuffle?: boolean;
     }
   ) {
+    this.currentTrack = track || null;
     this.init();
     this.setupNativeListeners();
 
     const isContentUri = url.startsWith('content://');
     const isNativeEnv = Capacitor.isNativePlatform();
 
-    // 1. If this is an Android content URI or running on native Android with a local track,
+    // 1. If this is an Android content URI or running on native Android with a playable track,
     // use the native MediaPlayer PlaybackManager!
-    if (isContentUri || (isNativeEnv && track?.sourceType === 'user-upload')) {
+    const shouldUseNativePlayer =
+      isContentUri ||
+      (isNativeEnv && !url.startsWith('blob:') && !url.startsWith('data:'));
+
+    if (shouldUseNativePlayer) {
       this.isNative = true;
       if (this.audioElement) {
         try {
@@ -765,43 +824,65 @@ class AudioEngineService {
     }
 
     // 2. Fallback for Native Android playback (where Android MediaPlayer handles audio output)
-    if (!isPlayingFallback && !this.isNative) {
+    const isActuallyPlaying = isPlayingFallback || this.isPlaying;
+    if (!isActuallyPlaying) {
       for (let i = 0; i < array.length; i++) {
-        array[i] = 0;
+        array[i] = Math.max(0, Math.floor(array[i] * 0.85 - 5));
       }
       return;
     }
 
-    // Generate responsive, organic music frequency spectrum for visualizer on Android
+    // 2a. Real hardware FFT data from Android AudioEffect Visualizer
+    if (this.isNative && this.nativeFftData && this.nativeFftData.length > 0) {
+      const fftLen = this.nativeFftData.length;
+      let hasSignal = false;
+      for (let i = 0; i < array.length; i++) {
+        const srcIdx = Math.floor((i / array.length) * fftLen);
+        const raw = this.nativeFftData[srcIdx] || 0;
+        if (raw > 5) hasSignal = true;
+        array[i] = Math.min(255, Math.floor(raw * 1.8));
+      }
+      if (hasSignal) return;
+    }
+
+    // 2b. High-energy bass & rhythmic pulse synthesis (kick, snare, hi-hat)
     const t = performance.now() / 1000;
-    const beatPhase = (t * 2.08) % 1;
-    const kick = Math.max(0, 1 - beatPhase * 3.5); // Fast punch & decay (~125 BPM)
-    const snarePhase = ((t * 2.08) + 0.5) % 1;
-    const snare = Math.max(0, 1 - snarePhase * 4.0);
+    const beatTime = t * 2.15; // ~129 BPM pulse
+    const beatPhase = beatTime % 1;
+    // Punchy kick envelope with smooth bass release
+    const kickEnvelope = Math.pow(Math.max(0, 1 - beatPhase * 2.5), 1.8);
+    const subBassGlide = Math.sin(t * 3.8) * 35 + Math.cos(t * 1.9) * 25;
+
+    // Snare / Clap on backbeats
+    const snarePhase = (beatTime + 0.5) % 1;
+    const snareEnvelope = Math.max(0, 1 - snarePhase * 3.0);
+
+    // Hi-hat 16th-note groove
+    const hihatPhase = (beatTime * 4) % 1;
+    const hihatEnvelope = Math.max(0, 1 - hihatPhase * 3.8);
 
     const len = array.length;
     for (let i = 0; i < len; i++) {
       const norm = i / len;
       let val = 0;
 
-      if (norm < 0.22) {
-        // Lows (Sub-bass & kick drum)
-        const bassFalloff = Math.max(0.2, 1 - norm * 2.8);
-        val = 60 + (kick * 170 + Math.sin(t * 3.8) * 25) * bassFalloff;
-      } else if (norm < 0.6) {
-        // Mids (Vocals, acoustic presence & instruments)
-        const midOsc = Math.sin(t * 6.5 + i * 0.55) * 35;
-        val = 55 + midOsc + snare * 115 + kick * 35;
+      if (norm < 0.28) {
+        // Lows & Sub-Bass (Deep 808s, bass guitar, and kick drum)
+        const bassProximity = 1 - norm * 2.5;
+        val = 95 + kickEnvelope * 150 * bassProximity + subBassGlide + Math.sin(t * 5.4 + i * 0.4) * 25;
+      } else if (norm < 0.65) {
+        // Mids (Vocals, acoustic presence, saxophone, synths)
+        const midOsc = Math.sin(t * 6.5 + i * 0.6) * 35 + Math.cos(t * 10.5 + i * 0.8) * 20;
+        val = 80 + midOsc + snareEnvelope * 105 + kickEnvelope * 50;
       } else {
-        // Highs (Percussion, hi-hats, shimmer)
-        const highJitter = (Math.sin(t * 14.2 + i * 0.8) * 20) + (Math.sin(t * 22.1 + i * 1.5) * 15);
-        const highDecay = Math.max(0.15, 1 - (norm - 0.6) * 1.7);
-        val = (50 + highJitter + (kick * 40)) * highDecay;
+        // Highs (Hi-hats, percussions, shakers, cymbals, air)
+        const highJitter = Math.sin(t * 15.2 + i * 1.1) * 25 + Math.sin(t * 26.5 + i * 1.7) * 18;
+        val = 75 + hihatEnvelope * 85 + snareEnvelope * 45 + highJitter;
       }
 
-      // Live variance so bars pulse musically
-      const variance = ((i * 19 + Math.floor(t * 40)) % 15) - 7;
-      array[i] = Math.max(12, Math.min(255, Math.floor(val + variance)));
+      // Bar-specific acoustic resonance and live shimmer
+      const barResonance = Math.sin(t * 22 + i * 2.4) * 12;
+      array[i] = Math.max(30, Math.min(255, Math.floor(val + barResonance)));
     }
   }
 
@@ -851,14 +932,18 @@ class AudioEngineService {
             title: t.title,
             artist: t.artist,
             album: t.album,
-            coverArt: t.coverArt,
+            coverArt: undefined, // Strip large base64 strings so setQueue IPC payload remains small & fast
             duration: t.duration ? Math.round(t.duration * 1000) : 0,
             isFavorite: t.isFavorite,
           };
         });
+        let currentRawId = currentId;
+        if (currentId && currentId.startsWith('native-')) {
+          currentRawId = currentId.replace('native-', '');
+        }
         await MusicLibrary.setQueue({
           queue: nativeQueue,
-          currentId,
+          currentId: currentRawId,
           repeatMode,
           isShuffle,
         });

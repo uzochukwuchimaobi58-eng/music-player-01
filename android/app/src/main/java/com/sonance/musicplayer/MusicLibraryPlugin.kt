@@ -61,44 +61,21 @@ class MusicLibraryPlugin : Plugin() {
         super.load()
 
         MusicPlaybackService.actionListener = { type, position ->
+            var handledByNative = false
             when (type) {
                 "next" -> {
-                    playbackManager?.playNext()
+                    handledByNative = playbackManager?.playNext() == true
                 }
                 "previous" -> {
-                    playbackManager?.playPrevious()
+                    handledByNative = playbackManager?.playPrevious() == true
                 }
                 "pause" -> {
                     playbackManager?.pause()
-                    MusicPlaybackService.update(
-                        context,
-                        title = currentTitle,
-                        artist = currentArtist,
-                        album = currentAlbum,
-                        songId = currentSongId,
-                        albumId = 0L,
-                        coverArt = currentCoverArt,
-                        isPlaying = false,
-                        positionMs = (playbackManager?.currentPosition ?: 0).toLong(),
-                        durationMs = (playbackManager?.duration ?: 0).toLong(),
-                        isFavorite = isFavorite
-                    )
+                    handledByNative = true
                 }
                 "play" -> {
                     playbackManager?.resume()
-                    MusicPlaybackService.update(
-                        context,
-                        title = currentTitle,
-                        artist = currentArtist,
-                        album = currentAlbum,
-                        songId = currentSongId,
-                        albumId = 0L,
-                        coverArt = currentCoverArt,
-                        isPlaying = true,
-                        positionMs = (playbackManager?.currentPosition ?: 0).toLong(),
-                        durationMs = (playbackManager?.duration ?: 0).toLong(),
-                        isFavorite = isFavorite
-                    )
+                    handledByNative = true
                 }
                 "toggle" -> {
                     if (playbackManager?.isPlaying == true) {
@@ -106,17 +83,21 @@ class MusicLibraryPlugin : Plugin() {
                     } else {
                         playbackManager?.resume()
                     }
+                    handledByNative = true
                 }
                 "seekTo" -> {
                     playbackManager?.seekTo(position.toInt())
+                    handledByNative = true
                 }
                 "close" -> {
                     playbackManager?.pause()
+                    handledByNative = true
                 }
             }
             val data = JSObject().apply {
                 put("type", type)
                 put("position", position)
+                put("handledByNative", handledByNative)
             }
             notifyListeners("mediaAction", data)
         }
@@ -127,7 +108,8 @@ class MusicLibraryPlugin : Plugin() {
                 currentArtist = track.artist
                 currentAlbum = track.album ?: "Music"
                 currentSongId = track.id.toLongOrNull() ?: 0L
-                currentCoverArt = track.coverArt
+                val internalArt = ArtworkHelper.getArtworkForSong(context, currentSongId, 0L)
+                currentCoverArt = internalArt ?: track.coverArt
                 this@MusicLibraryPlugin.isFavorite = track.isFavorite
 
                 MusicPlaybackService.update(
@@ -137,7 +119,7 @@ class MusicLibraryPlugin : Plugin() {
                     album = track.album,
                     songId = currentSongId,
                     albumId = 0L,
-                    coverArt = track.coverArt,
+                    coverArt = currentCoverArt,
                     isPlaying = true,
                     positionMs = 0L,
                     durationMs = track.duration,
@@ -149,6 +131,8 @@ class MusicLibraryPlugin : Plugin() {
                     put("index", index)
                     put("title", track.title)
                     put("artist", track.artist)
+                    put("duration", track.duration)
+                    put("artwork", currentCoverArt)
                 }
                 notifyListeners("trackAutoAdvanced", data)
             }
@@ -333,7 +317,13 @@ class MusicLibraryPlugin : Plugin() {
         val artist = call.getString("artist") ?: "Unknown Artist"
         val album = call.getString("album") ?: "Music"
         val coverArt = call.getString("coverArt")
-        val duration = call.getInt("duration") ?: 0
+        val rawDuration = (call.getDouble("duration") ?: (call.getInt("duration")?.toDouble() ?: 0.0)).toLong()
+        val durationMs = when {
+            rawDuration in 1..9999 -> rawDuration * 1000L
+            rawDuration > 10_000_000L -> rawDuration / 1000L
+            rawDuration >= 10000L -> rawDuration
+            else -> 0L
+        }
         val isFav = call.getBoolean("isFavorite") ?: false
 
         currentTitle = title
@@ -362,7 +352,7 @@ class MusicLibraryPlugin : Plugin() {
             coverArt = coverArt,
             isPlaying = true,
             positionMs = 0L,
-            durationMs = duration.toLong(),
+            durationMs = durationMs,
             isFavorite = isFav
         )
 
@@ -466,7 +456,13 @@ class MusicLibraryPlugin : Plugin() {
         val album = call.getString("album") ?: currentAlbum
         val coverArt = call.getString("coverArt") ?: currentCoverArt
         val isPlaying = call.getBoolean("isPlaying") ?: (playbackManager?.isPlaying == true)
-        val durationMs = (call.getDouble("duration") ?: (playbackManager?.duration?.toDouble() ?: 0.0)).toLong()
+        val rawDuration = (call.getDouble("duration") ?: (playbackManager?.duration?.toDouble() ?: 0.0)).toLong()
+        val durationMs = when {
+            rawDuration in 1..9999 -> rawDuration * 1000L
+            rawDuration > 10_000_000L -> rawDuration / 1000L
+            rawDuration >= 10000L -> rawDuration
+            else -> (playbackManager?.duration?.toLong() ?: 0L)
+        }
         val currentPositionMs = (call.getDouble("currentTime") ?: (playbackManager?.currentPosition?.toDouble() ?: 0.0)).toLong()
         val isFav = call.getBoolean("isFavorite") ?: this.isFavorite
 
@@ -964,8 +960,8 @@ class MusicLibraryPlugin : Plugin() {
                         album
                     }
 
-                    // Extract actual music artwork for each song (cached per album for speed)
-                    val artworkBase64 = ArtworkHelper.getArtworkForSong(context, id, albumId)
+                    // Extract actual music artwork for each song, saved to device INTERNAL STORAGE
+                    val artworkInternalPath = ArtworkHelper.getArtworkForSong(context, id, albumId)
 
                     val songObj = JSObject().apply {
                         put("id", id.toString())
@@ -975,7 +971,8 @@ class MusicLibraryPlugin : Plugin() {
                         put("duration", duration)
                         put("uri", songUri)
                         put("albumId", albumId.toString())
-                        put("artwork", artworkBase64)
+                        put("artwork", artworkInternalPath)
+                        put("artworkPath", artworkInternalPath)
                         put("dateAdded", dateAddedMs)
                         put("folder", folder)
                         put("fileSize", fileSize)
@@ -996,6 +993,39 @@ class MusicLibraryPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun saveArtworkToInternalStorage(call: PluginCall) {
+        val songId = call.getString("songId")?.toLongOrNull() ?: 0L
+        val albumId = call.getString("albumId")?.toLongOrNull() ?: 0L
+        val data = call.getString("data")
+        if (data.isNullOrBlank()) {
+            call.reject("Artwork data is required", "INVALID_DATA")
+            return
+        }
+        val savedPath = ArtworkHelper.saveArtworkDataToInternalStorage(context, songId, albumId, data)
+        if (savedPath != null) {
+            val ret = JSObject().apply {
+                put("filePath", savedPath)
+                put("success", true)
+            }
+            call.resolve(ret)
+        } else {
+            call.reject("Failed to save artwork to internal storage", "SAVE_ERROR")
+        }
+    }
+
+    @PluginMethod
+    fun getArtwork(call: PluginCall) {
+        val songId = call.getString("songId")?.toLongOrNull() ?: 0L
+        val albumId = call.getString("albumId")?.toLongOrNull() ?: 0L
+        val path = ArtworkHelper.getArtworkForSong(context, songId, albumId)
+        val ret = JSObject().apply {
+            put("artwork", path)
+            put("filePath", path)
+        }
+        call.resolve(ret)
+    }
+
+    @PluginMethod
     fun minimizeApp(call: PluginCall) {
         try {
             activity?.let {
@@ -1007,6 +1037,24 @@ class MusicLibraryPlugin : Plugin() {
         } catch (e: Exception) {
             call.reject("Failed to minimize app: ${e.message}", "MINIMIZE_ERROR")
         }
+    }
+
+    @PluginMethod
+    fun getVisualizerWaveform(call: PluginCall) {
+        val fft = playbackManager?.getLatestFft()
+        val ret = JSObject()
+        if (fft != null && fft.isNotEmpty()) {
+            val arr = JSArray()
+            val limit = fft.size.coerceAtMost(64)
+            for (i in 0 until limit) {
+                val b = (fft[i].toInt() and 0xFF)
+                arr.put(b)
+            }
+            ret.put("data", arr)
+        } else {
+            ret.put("data", JSArray())
+        }
+        call.resolve(ret)
     }
 
     @PluginMethod
