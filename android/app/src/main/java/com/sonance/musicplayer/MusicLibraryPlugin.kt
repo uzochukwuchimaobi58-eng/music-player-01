@@ -567,6 +567,7 @@ class MusicLibraryPlugin : Plugin() {
         val artwork = ArtworkHelper.getArtworkForSong(context, songId, albumId)
         val ret = JSObject().apply {
             put("artwork", artwork)
+            put("filePath", artwork)
         }
         call.resolve(ret)
     }
@@ -1011,18 +1012,6 @@ class MusicLibraryPlugin : Plugin() {
         } else {
             call.reject("Failed to save artwork to internal storage", "SAVE_ERROR")
         }
-    }
-
-    @PluginMethod
-    fun getArtwork(call: PluginCall) {
-        val songId = call.getString("songId")?.toLongOrNull() ?: 0L
-        val albumId = call.getString("albumId")?.toLongOrNull() ?: 0L
-        val path = ArtworkHelper.getArtworkForSong(context, songId, albumId)
-        val ret = JSObject().apply {
-            put("artwork", path)
-            put("filePath", path)
-        }
-        call.resolve(ret)
     }
 
     @PluginMethod
