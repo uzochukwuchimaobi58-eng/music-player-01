@@ -564,7 +564,8 @@ class MusicLibraryPlugin : Plugin() {
     fun getArtwork(call: PluginCall) {
         val songId = call.getString("songId")?.toLongOrNull() ?: 0L
         val albumId = call.getString("albumId")?.toLongOrNull() ?: 0L
-        val artwork = ArtworkHelper.getArtworkForSong(context, songId, albumId)
+        val filePath = call.getString("filePath") ?: call.getString("uri")
+        val artwork = ArtworkHelper.getArtworkForSong(context, songId, albumId, filePath)
         val ret = JSObject().apply {
             put("artwork", artwork)
             put("filePath", artwork)
@@ -962,7 +963,7 @@ class MusicLibraryPlugin : Plugin() {
                     }
 
                     // Extract actual music artwork for each song, saved to device INTERNAL STORAGE
-                    val artworkInternalPath = ArtworkHelper.getArtworkForSong(context, id, albumId)
+                    val artworkInternalPath = ArtworkHelper.getArtworkForSong(context, id, albumId, filePath)
 
                     val songObj = JSObject().apply {
                         put("id", id.toString())

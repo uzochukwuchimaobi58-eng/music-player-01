@@ -2,6 +2,7 @@ import React from 'react';
 import { Play, Pause, SkipForward, ListMusic, Music } from 'lucide-react';
 import { Track, AppTheme } from '../types';
 import { getThemeConfig } from '../data/themes';
+import { TrackArtwork } from './TrackArtwork';
 
 interface MiniPlayerProps {
   currentTrack: Track | null;
@@ -64,16 +65,14 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
         >
           {/* Square Cover Box */}
           <div className="relative w-11 h-11 rounded-md overflow-hidden shrink-0 border border-zinc-700/60 shadow-md bg-zinc-800 flex items-center justify-center">
-            {currentTrack.coverArt ? (
-              <img
-                src={currentTrack.coverArt}
-                alt={currentTrack.title}
-                referrerPolicy="no-referrer"
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-              />
-            ) : (
-              <Music className="w-5 h-5 text-zinc-400" />
-            )}
+            <TrackArtwork
+              coverArt={currentTrack.coverArt}
+              title={currentTrack.title}
+              artist={currentTrack.artist}
+              alt={currentTrack.title}
+              className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+              iconClassName="w-5 h-5 text-white/70"
+            />
           </div>
 
           {/* Title & Artist */}

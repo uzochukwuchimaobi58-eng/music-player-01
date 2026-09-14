@@ -93,25 +93,90 @@ class PlaybackManager(private val context: Context) {
             0
         }
 
+    private var attachedSessionId: Int = -1
+
+    private fun ensureAudioEffects(sessionId: Int) {
+        if (attachedSessionId == sessionId && equalizer != null) {
+            return
+        }
+        setupAudioEffects(sessionId)
+        attachedSessionId = sessionId
+    }
+
+    private fun createMediaPlayer(): MediaPlayer {
+        return MediaPlayer().apply {
+            setWakeMode(context, PowerManager.PARTIAL_WAKE_LOCK)
+            setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .build()
+            )
+            setOnPreparedListener { mp ->
+                isPrepared = true
+                try {
+                    ensureAudioEffects(mp.audioSessionId)
+                    if (currentSpeed != 1.0f && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        try {
+                            val params = mp.playbackParams
+                            params.speed = currentSpeed
+                            mp.playbackParams = params
+                        } catch (pe: Exception) {
+                            android.util.Log.w("PlaybackManager", "Error setting initial speed: $pe")
+                        }
+                    }
+                    mp.start()
+                    onStateChangeCallback?.invoke(true)
+                    onPreparedCallback?.invoke(mp.duration, mp.currentPosition)
+                    startProgressUpdates()
+                } catch (e: Exception) {
+                    onErrorCallback?.invoke(-1, -1, "Failed to start after prepare: ${e.message}")
+                }
+            }
+
+            setOnCompletionListener {
+                stopProgressUpdates()
+                onStateChangeCallback?.invoke(false)
+
+                // 1. Repeat single track: loop immediately
+                if (repeatMode == "one" && isPrepared) {
+                    try {
+                        mediaPlayer?.seekTo(0)
+                        mediaPlayer?.start()
+                        onStateChangeCallback?.invoke(true)
+                        startProgressUpdates()
+                        return@setOnCompletionListener
+                    } catch (_: Exception) {}
+                }
+
+                // 2. Continuous playback: seamlessly advance to next track in native queue
+                if (nativeQueue.isNotEmpty()) {
+                    val nextIdx = getNextIndex()
+                    if (nextIdx != -1) {
+                        playQueueItemAt(nextIdx)
+                        return@setOnCompletionListener
+                    }
+                }
+
+                onCompletionCallback?.invoke()
+            }
+
+            setOnErrorListener { _, what, extra ->
+                stopProgressUpdates()
+                isPrepared = false
+                onStateChangeCallback?.invoke(false)
+                onErrorCallback?.invoke(what, extra, "MediaPlayer error: what=$what, extra=$extra")
+                true
+            }
+        }
+    }
+
     /**
      * Resolves valid content URI or file path and loads it into MediaPlayer
      */
     fun playTrack(uriString: String?, idString: String?) {
         stopProgressUpdates()
         isPrepared = false
-
-        // Clean up any existing playback instance safely
-        releaseAudioEffects()
-        mediaPlayer?.let {
-            try {
-                if (it.isPlaying) {
-                    it.stop()
-                }
-                it.reset()
-                it.release()
-            } catch (_: Exception) {}
-        }
-        mediaPlayer = null
 
         // 1. Ensure track passes a valid content URI (using ContentUris & MediaStore) or correct absolute file path
         val mediaUri: Uri? = when {
@@ -143,84 +208,36 @@ class PlaybackManager(private val context: Context) {
         }
 
         try {
-            val player = MediaPlayer().apply {
-                setWakeMode(context, PowerManager.PARTIAL_WAKE_LOCK)
-                setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
-                        .build()
-                )
-
-                // Set data source with context and valid content URI
-                setDataSource(context, mediaUri)
-
-                // 2. Ensure prepareAsync() is used correctly, and player.start() is ONLY called
-                // inside setOnPreparedListener callback rather than immediately after setDataSource
-                setOnPreparedListener { mp ->
-                    isPrepared = true
-                    try {
-                        setupAudioEffects(mp.audioSessionId)
-                        if (currentSpeed != 1.0f && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                            try {
-                                val params = mp.playbackParams
-                                params.speed = currentSpeed
-                                mp.playbackParams = params
-                            } catch (pe: Exception) {
-                                android.util.Log.w("PlaybackManager", "Error setting initial speed: $pe")
-                            }
-                        }
-                        mp.start()
-                        onStateChangeCallback?.invoke(true)
-                        onPreparedCallback?.invoke(mp.duration, mp.currentPosition)
-                        startProgressUpdates()
-                    } catch (e: Exception) {
-                        onErrorCallback?.invoke(-1, -1, "Failed to start after prepare: ${e.message}")
-                    }
+            val player = mediaPlayer ?: createMediaPlayer().also { mediaPlayer = it }
+            try {
+                if (player.isPlaying) {
+                    player.stop()
                 }
+            } catch (_: Exception) {}
 
-                setOnCompletionListener {
-                    stopProgressUpdates()
-                    onStateChangeCallback?.invoke(false)
-
-                    // 1. Repeat single track: loop immediately
-                    if (repeatMode == "one" && isPrepared) {
-                        try {
-                            mediaPlayer?.seekTo(0)
-                            mediaPlayer?.start()
-                            onStateChangeCallback?.invoke(true)
-                            startProgressUpdates()
-                            return@setOnCompletionListener
-                        } catch (_: Exception) {}
-                    }
-
-                    // 2. Continuous playback: seamlessly advance to next track in native queue
-                    if (nativeQueue.isNotEmpty()) {
-                        val nextIdx = getNextIndex()
-                        if (nextIdx != -1) {
-                            playQueueItemAt(nextIdx)
-                            return@setOnCompletionListener
-                        }
-                    }
-
-                    onCompletionCallback?.invoke()
-                }
-
-                setOnErrorListener { _, what, extra ->
-                    stopProgressUpdates()
-                    isPrepared = false
-                    onStateChangeCallback?.invoke(false)
-                    onErrorCallback?.invoke(what, extra, "MediaPlayer error: what=$what, extra=$extra")
-                    true // Return true to signify error has been handled
-                }
-            }
-
-            mediaPlayer = player
-            // Prepare asynchronously without blocking the UI main thread
+            player.reset()
+            player.setWakeMode(context, PowerManager.PARTIAL_WAKE_LOCK)
+            player.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .build()
+            )
+            player.setDataSource(context, mediaUri)
             player.prepareAsync()
-
         } catch (e: Exception) {
-            onErrorCallback?.invoke(-1, -1, "Failed to initialize MediaPlayer: ${e.localizedMessage ?: e.message}")
+            // If reusing failed, recreate clean instance once
+            try {
+                releaseAudioEffects()
+                attachedSessionId = -1
+                mediaPlayer?.release()
+                mediaPlayer = null
+                val freshPlayer = createMediaPlayer().also { mediaPlayer = it }
+                freshPlayer.setDataSource(context, mediaUri)
+                freshPlayer.prepareAsync()
+            } catch (e2: Exception) {
+                onErrorCallback?.invoke(-1, -1, "Failed to load audio: ${e2.message}")
+            }
         }
     }
 
@@ -262,6 +279,7 @@ class PlaybackManager(private val context: Context) {
     fun release() {
         stopProgressUpdates()
         releaseAudioEffects()
+        attachedSessionId = -1
         try {
             mediaPlayer?.apply {
                 if (isPlaying) {

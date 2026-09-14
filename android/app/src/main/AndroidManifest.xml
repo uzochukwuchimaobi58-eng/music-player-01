@@ -37,6 +37,13 @@
     <!-- Haptic feedback for controls and equalizers -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Prevent Google Play from filtering out devices lacking specific hardware (tablets, TVs, cars) -->
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"

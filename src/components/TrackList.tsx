@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { Track, Playlist, ActiveView } from '../types';
 import { compareMusicTitles, compareMusicArtists } from '../utils/trackSort';
+import { TrackArtwork } from './TrackArtwork';
 
 function formatTimeAgo(timestamp?: number): string {
   if (!timestamp) return '';
@@ -342,12 +343,13 @@ export const TrackList: React.FC<TrackListProps> = ({
                 >
                   {/* Track Artwork / Play indicator */}
                   <div className="relative w-11 h-11 rounded-lg overflow-hidden shrink-0 bg-zinc-950 border border-zinc-800">
-                    <img
-                      src={track.coverArt}
+                    <TrackArtwork
+                      coverArt={track.coverArt}
+                      title={track.title}
+                      artist={track.artist}
                       alt={track.title}
-                      loading="lazy"
-                      referrerPolicy="no-referrer"
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      iconClassName="w-4 h-4 text-white/70"
                     />
 
                     {isCurrent ? (

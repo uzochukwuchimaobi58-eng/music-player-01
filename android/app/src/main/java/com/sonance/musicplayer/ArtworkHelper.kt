@@ -30,6 +30,7 @@ import java.net.URL
 object ArtworkHelper {
     private const val ARTWORK_DIR_NAME = "music_artwork"
     private val memoryCache = mutableMapOf<Long, String?>()
+    private val bitmapCache = mutableMapOf<String, Bitmap>()
 
     fun getArtworkDirectory(context: Context): File {
         val dir = File(context.filesDir, ARTWORK_DIR_NAME)
@@ -43,7 +44,7 @@ object ArtworkHelper {
      * Finds or extracts music artwork, saves it to device internal storage,
      * and returns the local file path or data URI for rendering.
      */
-    fun getArtworkForSong(context: Context, songId: Long, albumId: Long): String? {
+    fun getArtworkForSong(context: Context, songId: Long, albumId: Long, directFilePath: String? = null): String? {
         if (albumId > 0 && memoryCache.containsKey(albumId)) {
             val cached = memoryCache[albumId]
             if (!cached.isNullOrBlank()) return cached
@@ -56,7 +57,7 @@ object ArtworkHelper {
         // 1. Check if already saved in internal storage
         if (albumFile != null && albumFile.exists() && albumFile.length() > 0) {
             val path = albumFile.absolutePath
-            memoryCache[albumId] = path
+            if (albumId > 0) memoryCache[albumId] = path
             return path
         }
         if (songFile != null && songFile.exists() && songFile.length() > 0) {
@@ -67,15 +68,23 @@ object ArtworkHelper {
 
         var extractedBitmap: Bitmap? = null
 
-        // 2. Android 10+ (API 29+) official ContentResolver loadThumbnail
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && songId > 0) {
-            try {
-                val songUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, songId)
-                extractedBitmap = context.contentResolver.loadThumbnail(songUri, Size(512, 512), null)
-            } catch (_: Throwable) {}
+        // 2. Android 10+ (API 29+) official ContentResolver loadThumbnail for Album and Song
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (albumId > 0) {
+                try {
+                    val albumUri = ContentUris.withAppendedId(MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI, albumId)
+                    extractedBitmap = context.contentResolver.loadThumbnail(albumUri, Size(512, 512), null)
+                } catch (_: Throwable) {}
+            }
+            if (extractedBitmap == null && songId > 0) {
+                try {
+                    val songUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, songId)
+                    extractedBitmap = context.contentResolver.loadThumbnail(songUri, Size(512, 512), null)
+                } catch (_: Throwable) {}
+            }
         }
 
-        // 3. MediaStore album art URI: content://media/external/audio/albumart/<albumId>
+        // 3. MediaStore album art URI: content://media/external/audio/albumart/<albumId> (Android <= 9)
         if (extractedBitmap == null && albumId > 0) {
             try {
                 val albumArtUri = ContentUris.withAppendedId(Uri.parse("content://media/external/audio/albumart"), albumId)
@@ -85,17 +94,28 @@ object ArtworkHelper {
             } catch (_: Throwable) {}
         }
 
-        // 4. Fallback: MediaMetadataRetriever embedded picture from audio file
-        if (extractedBitmap == null && songId > 0) {
+        // 4. Fallback: Direct embedded picture extraction via MediaMetadataRetriever
+        if (extractedBitmap == null) {
             try {
-                val songUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, songId)
                 val mmr = MediaMetadataRetriever()
-                mmr.setDataSource(context, songUri)
-                val artBytes = mmr.embeddedPicture
-                mmr.release()
-                if (artBytes != null && artBytes.isNotEmpty()) {
-                    extractedBitmap = BitmapFactory.decodeByteArray(artBytes, 0, artBytes.size)
+                var hasSource = false
+                if (!directFilePath.isNullOrBlank() && File(directFilePath).exists()) {
+                    mmr.setDataSource(directFilePath)
+                    hasSource = true
+                } else if (songId > 0) {
+                    val songUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, songId)
+                    context.contentResolver.openFileDescriptor(songUri, "r")?.use { pfd ->
+                        mmr.setDataSource(pfd.fileDescriptor)
+                        hasSource = true
+                    }
                 }
+                if (hasSource) {
+                    val artBytes = mmr.embeddedPicture
+                    if (artBytes != null && artBytes.isNotEmpty()) {
+                        extractedBitmap = BitmapFactory.decodeByteArray(artBytes, 0, artBytes.size)
+                    }
+                }
+                mmr.release()
             } catch (_: Throwable) {}
         }
 
@@ -186,6 +206,11 @@ object ArtworkHelper {
      * Looks through internal storage first, then parses data, and falls back to a sleek generated music art.
      */
     fun getArtworkBitmap(context: Context, songId: Long, albumId: Long, coverArtData: String? = null, title: String? = null): Bitmap {
+        val cacheKey = "$songId-$albumId-${coverArtData ?: ""}"
+        bitmapCache[cacheKey]?.let { cached ->
+            if (!cached.isRecycled) return cached
+        }
+
         val artworkDir = getArtworkDirectory(context)
 
         // 1. Check internal storage files
@@ -193,18 +218,24 @@ object ArtworkHelper {
             val albumFile = File(artworkDir, "album_${albumId}.jpg")
             if (albumFile.exists() && albumFile.length() > 0) {
                 val bmp = BitmapFactory.decodeFile(albumFile.absolutePath)
-                if (bmp != null) return bmp
+                if (bmp != null) {
+                    bitmapCache[cacheKey] = bmp
+                    return bmp
+                }
             }
         }
         if (songId > 0) {
             val songFile = File(artworkDir, "song_${songId}.jpg")
             if (songFile.exists() && songFile.length() > 0) {
                 val bmp = BitmapFactory.decodeFile(songFile.absolutePath)
-                if (bmp != null) return bmp
+                if (bmp != null) {
+                    bitmapCache[cacheKey] = bmp
+                    return bmp
+                }
             }
         }
 
-        // 2. Parse coverArtData if provided
+        // 2. Parse coverArtData if provided (local file or base64 only - never do network calls synchronously)
         if (!coverArtData.isNullOrBlank()) {
             try {
                 if (coverArtData.startsWith("data:image")) {
@@ -212,9 +243,9 @@ object ArtworkHelper {
                     val decodedBytes = Base64.decode(base64Part, Base64.DEFAULT)
                     val bmp = BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
                     if (bmp != null) {
-                        // Persist to internal storage for next time
                         val target = if (albumId > 0) File(artworkDir, "album_${albumId}.jpg") else File(artworkDir, "song_${songId}.jpg")
                         saveBitmapToInternalStorage(bmp, target)
+                        bitmapCache[cacheKey] = bmp
                         return bmp
                     }
                 } else if (coverArtData.startsWith("/") || coverArtData.startsWith("file://")) {
@@ -222,7 +253,10 @@ object ArtworkHelper {
                     val file = File(filePath)
                     if (file.exists()) {
                         val bmp = BitmapFactory.decodeFile(file.absolutePath)
-                        if (bmp != null) return bmp
+                        if (bmp != null) {
+                            bitmapCache[cacheKey] = bmp
+                            return bmp
+                        }
                     }
                 }
             } catch (_: Throwable) {}
@@ -274,7 +308,9 @@ object ArtworkHelper {
         }
 
         // 4. Default high-resolution branded music artwork generator
-        return generateFallbackArtwork(title ?: "Sonance Music")
+        val fallback = generateFallbackArtwork(title ?: "Sonance Music")
+        bitmapCache[cacheKey] = fallback
+        return fallback
     }
 
     /**

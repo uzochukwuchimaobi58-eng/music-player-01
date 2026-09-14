@@ -36,6 +36,7 @@ import { Track, RepeatMode } from '../types';
 import { TrendingAudioEffect } from '../services/audioEngine';
 import { VisualizerCanvas } from './VisualizerCanvas';
 import { parseLrcLyrics, autoScanTrackLyrics } from '../services/lyricsScanner';
+import { TrackArtwork } from './TrackArtwork';
 
 interface FullPlayerProps {
   isOpen: boolean;
@@ -286,28 +287,14 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
                 className="relative w-full h-full rounded-2xl overflow-hidden border-2 border-zinc-700/80 shadow-2xl group cursor-pointer bg-zinc-900 flex items-center justify-center"
                 title="Tap to change or edit cover artwork"
               >
-                {currentTrack.coverArt ? (
-                  <img
-                    src={currentTrack.coverArt}
-                    alt={currentTrack.title}
-                    referrerPolicy="no-referrer"
-                    onError={(e) => {
-                      e.currentTarget.style.display = 'none';
-                      const fallback = e.currentTarget.nextElementSibling as HTMLElement;
-                      if (fallback) fallback.style.display = 'flex';
-                    }}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
-                ) : null}
-
-                <div
-                  className={`w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-amber-600/30 via-zinc-900 to-zinc-950 p-4 text-center ${
-                    currentTrack.coverArt ? 'hidden' : 'flex'
-                  }`}
-                >
-                  <Music className="w-12 h-12 text-amber-400 mb-2" />
-                  <span className="text-xs font-semibold text-zinc-300 line-clamp-1">{currentTrack.title}</span>
-                </div>
+                <TrackArtwork
+                  coverArt={currentTrack.coverArt}
+                  title={currentTrack.title}
+                  artist={currentTrack.artist}
+                  alt={currentTrack.title}
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                  iconClassName="w-12 h-12 text-amber-400"
+                />
 
                 {/* Edit Artwork Overlay */}
                 <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-white transition-opacity">
@@ -345,27 +332,15 @@ export const FullPlayer: React.FC<FullPlayerProps> = ({
                   className="relative w-20 h-20 sm:w-28 sm:h-28 rounded-full overflow-hidden border-2 border-zinc-700 shadow-inner group cursor-pointer bg-zinc-900 flex items-center justify-center"
                   title="Change Cover Artwork (Camera / Gallery)"
                 >
-                  {currentTrack.coverArt ? (
-                    <img
-                      src={currentTrack.coverArt}
-                      alt={currentTrack.title}
-                      referrerPolicy="no-referrer"
-                      onError={(e) => {
-                        e.currentTarget.style.display = 'none';
-                        const fallback = e.currentTarget.nextElementSibling as HTMLElement;
-                        if (fallback) fallback.style.display = 'flex';
-                      }}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                    />
-                  ) : null}
-
-                  <div
-                    className={`w-full h-full flex items-center justify-center bg-zinc-900 ${
-                      currentTrack.coverArt ? 'hidden' : 'flex'
-                    }`}
-                  >
-                    <Music className="w-6 h-6 text-amber-400" />
-                  </div>
+                  <TrackArtwork
+                    coverArt={currentTrack.coverArt}
+                    title={currentTrack.title}
+                    artist={currentTrack.artist}
+                    alt={currentTrack.title}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                    iconClassName="w-6 h-6 text-amber-400"
+                    showVinylGrooves={false}
+                  />
 
                   {/* Hover Camera Overlay */}
                   <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-white transition-opacity">

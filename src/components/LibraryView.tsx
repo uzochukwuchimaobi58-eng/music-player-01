@@ -20,6 +20,7 @@ import {
 import { Track, AppTheme } from '../types';
 import { THEMES, ThemeDefinition } from '../data/themes';
 import { compareMusicTitles, compareMusicArtists } from '../utils/trackSort';
+import { TrackArtwork } from './TrackArtwork';
 
 export type LibrarySubTab = 'tracks' | 'artists' | 'albums' | 'genres' | 'folders';
 
@@ -601,17 +602,14 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                   >
                     {/* Left: Square Cover Art Thumbnail */}
                     <div className="relative w-12 h-12 rounded-lg overflow-hidden shrink-0 bg-black/40 border border-white/10 shadow-sm flex items-center justify-center">
-                      {track.coverArt ? (
-                        <img
-                          src={track.coverArt}
-                          alt={track.title}
-                          loading="lazy"
-                          referrerPolicy="no-referrer"
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                        />
-                      ) : (
-                        <Music className="w-6 h-6 opacity-40" style={{ color: theme.textSecondary }} />
-                      )}
+                      <TrackArtwork
+                        coverArt={track.coverArt}
+                        title={track.title}
+                        artist={track.artist}
+                        alt={track.title}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                        iconClassName="w-5 h-5 opacity-70"
+                      />
 
                       {/* Playing Animated Indicator */}
                       {isCurrent && (
@@ -690,15 +688,13 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="w-12 h-12 rounded-full overflow-hidden bg-black/40 border border-white/10 flex items-center justify-center shrink-0">
-                    {artist.coverArt ? (
-                      <img
-                        src={artist.coverArt}
-                        alt={artist.name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <User className="w-6 h-6 opacity-60" style={{ color: theme.textSecondary }} />
-                    )}
+                    <TrackArtwork
+                      coverArt={artist.coverArt}
+                      title={artist.name}
+                      alt={artist.name}
+                      className="w-full h-full object-cover"
+                      iconClassName="w-5 h-5 opacity-70"
+                    />
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-semibold truncate" style={{ color: theme.textPrimary }}>
@@ -739,17 +735,13 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                 className="p-2.5 rounded-xl bg-black/20 hover:bg-black/40 border border-white/10 transition-all cursor-pointer group flex flex-col"
               >
                 <div className="aspect-square w-full rounded-lg overflow-hidden bg-black/40 border border-white/10 mb-2 relative">
-                  {album.coverArt ? (
-                    <img
-                      src={album.coverArt}
-                      alt={album.name}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <Disc3 className="w-8 h-8 opacity-40" style={{ color: theme.textSecondary }} />
-                    </div>
-                  )}
+                  <TrackArtwork
+                    coverArt={album.coverArt}
+                    title={album.name}
+                    alt={album.name}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                    iconClassName="w-8 h-8 opacity-70"
+                  />
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
