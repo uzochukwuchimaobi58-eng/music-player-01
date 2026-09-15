@@ -1,0 +1,123 @@
+package com.sonance.musicplayer.model
+
+import kotlinx.serialization.Serializable
+
+@Serializable
+enum class RepeatMode {
+    OFF, ALL, ONE
+}
+
+@Serializable
+enum class EqPreset(val displayName: String) {
+    FLAT("Flat"),
+    BASS_BOOST("Bass Boost"),
+    VOCAL_BOOSTER("Vocal Booster"),
+    ROCK("Rock"),
+    ELECTRONIC("Electronic"),
+    JAZZ("Jazz"),
+    ACOUSTIC("Acoustic"),
+    HIFI_MASTER("Hi-Fi Master"),
+    CUSTOM("Custom")
+}
+
+@Serializable
+enum class AppTheme(val idStr: String, val displayName: String) {
+    DARK_AMOLED("dark-amoled", "Classic Music Player"),
+    DARK_SLATE("dark-slate", "Modern Slate & Neon Cyan"),
+    CYBERPUNK("cyberpunk", "Cyberpunk Neon & Violet"),
+    MIDNIGHT_BLUE("midnight-blue", "Midnight Sapphire Ocean"),
+    SUNSET_WARM("sunset-warm", "Warm Sunset & Amber"),
+    EMERALD_FOREST("emerald-forest", "Deep Emerald & Mint Forest"),
+    CRIMSON_RUBY("crimson-ruby", "Velvet Crimson & Ruby"),
+    GOLDEN_LUXURY("golden-luxury", "Golden Royalty & Onyx"),
+    LIGHT_MINIMAL("light-minimal", "Clean Studio Light")
+}
+
+@Serializable
+enum class ActiveView {
+    HOME,
+    LIBRARY,
+    FOLDER,
+    FAVORITE,
+    RECENT_PLAY,
+    RECENT_ADD,
+    MOST_PLAY,
+    PLAYLIST_DETAIL,
+    DRIVE_MODE,
+    LYRICS_MODE
+}
+
+@Serializable
+enum class TrendingAudioEffect(val label: String) {
+    OFF("Normal"),
+    BASS_BOOST("Super Bass"),
+    SLOWED_REVERB("Slowed & Reverb"),
+    NIGHTCORE("Nightcore (+Speed)"),
+    HIFI_STUDIO("Lossless Studio")
+}
+
+@Serializable
+data class Track(
+    val id: String,
+    val title: String,
+    val artist: String,
+    val album: String = "Music",
+    val duration: Long = 0L, // in seconds
+    val url: String = "",
+    val coverArt: String = "",
+    val folder: String = "Phone Storage",
+    val isFavorite: Boolean = false,
+    val playCount: Int = 0,
+    val dateAdded: Long = System.currentTimeMillis(),
+    val lastPlayed: Long = 0L,
+    val isOffline: Boolean = true,
+    val lyrics: String = "",
+    val bitrate: String = "320 kbps",
+    val sampleRate: String = "44.1 kHz",
+    val fileSize: String = "8.0 MB",
+    val sourceType: String = "built-in"
+) {
+    val addedDate: Long get() = dateAdded
+}
+
+@Serializable
+data class Playlist(
+    val id: String,
+    val name: String,
+    val color: String = "#38bdf8",
+    val trackIds: List<String> = emptyList(),
+    val createdAt: Long = System.currentTimeMillis(),
+    val isDefault: Boolean = false
+)
+
+@Serializable
+data class EqualizerSettings(
+    val enabled: Boolean = true,
+    val preset: EqPreset = EqPreset.FLAT,
+    val bands: Map<Int, Int> = mapOf(
+        60 to 0,
+        170 to 0,
+        310 to 0,
+        600 to 0,
+        1000 to 0,
+        3000 to 0,
+        6000 to 0,
+        12000 to 0,
+        14000 to 0,
+        16000 to 0
+    ),
+    val bassBoost: Int = 0, // 0..100
+    val spatialReverb: Int = 0, // 0..100
+    val trebleBoost: Int = 0 // 0..100
+)
+
+@Serializable
+data class PlayerSettings(
+    val use10BandsEqualizer: Boolean = true,
+    val showHiddenFiles: Boolean = false,
+    val showDirectories: Boolean = true,
+    val keepScreenOn: Boolean = false,
+    val forwardAndBackward: Boolean = true,
+    val gaplessPlayback: Boolean = true,
+    val accentColor: String = "gold" // gold, cyan, purple, emerald, rose, blue
+)
